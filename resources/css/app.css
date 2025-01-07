@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Transitions pour le mode sombre */
+.dark {
+    color-scheme: dark;
+}
+
+/* Transitions douces pour les changements de couleur */
+* {
+    transition: background-color 0.3s ease-in-out, border-color 0.3s ease-in-out;
+}
+
+/* Styles pour les blocs de code dans markdown */
+.prose pre {
+    @apply bg-gray-100 dark:bg-gray-800 rounded-lg overflow-x-auto;
+}
+
+.prose code {
+    @apply bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded text-sm;
+}
+
+.prose pre code {
+    @apply bg-transparent p-0;
+}
+
+[x-cloak] {
+    display: none;
+}
