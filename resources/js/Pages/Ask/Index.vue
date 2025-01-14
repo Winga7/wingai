@@ -5,25 +5,25 @@ import AppLayout from '@/Layouts/AppLayout.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import ChatHistory from '@/Components/ChatHistory.vue';
 import CharacterCount from '@/Components/CharacterCount.vue';
-
+import MarkdownRenderer from '@/Components/MarkdownRenderer.vue';
 
 const props = defineProps({
-    models: Array,
-    selectedModel: String,
     conversations: Array,
     currentConversation: Object,
-    messages: Array
+    messages: Array,
+    models: Array
 });
 
 const messages = ref(props.messages || []);
+
 const form = useForm({
     message: '',
-    model: props.selectedModel,
-    conversation_id: props.currentConversation?.id || null
+    conversation_id: props.currentConversation?.id,
+    model: props.currentConversation?.model || 'gpt-3.5-turbo'
 });
 
 const handleSelectConversation = (conversation) => {
-    router.get(route('ask.index', { conversation_id: conversation.id }), {}, {
+    router.get(route('ask.index', { conversation_id: conversation.id }), {
         preserveState: true,
         preserveScroll: true,
         only: ['messages', 'currentConversation']
@@ -60,6 +60,10 @@ const handleKeydown = (e) => {
 
 const handleModelChange = (event) => {
     form.model = event.target.value;
+};
+
+const markdownToHtml = (content) => {
+    return marked(content, { breaks: true });
 };
 </script>
 
@@ -122,9 +126,7 @@ const handleModelChange = (event) => {
                                     </span>
                                 </div>
                             </div>
-                            <div class="prose dark:prose-invert max-w-none">
-                                {{ message.content }}
-                            </div>
+                            <MarkdownRenderer :content="message.content" />
                         </div>
                     </div>
                 </div>

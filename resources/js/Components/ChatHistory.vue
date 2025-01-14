@@ -32,8 +32,7 @@ const deleteConversation = (e, conversationId) => {
 };
 
 const newConversation = () => {
-    router.post(route('ask.store'), {
-        message: 'Nouvelle conversation',
+    router.post(route('conversations.store'), {
         model: 'gpt-3.5-turbo'
     }, {
         preserveState: true,

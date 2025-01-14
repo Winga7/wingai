@@ -126,25 +126,31 @@ class ChatService
 
                 Directives de formatage obligatoires pour toutes tes réponses :
 
-                1. Structure du texte :
-                   - Utilise des paragraphes courts (2-3 phrases maximum)
-                   - Ajoute TOUJOURS une ligne vide entre chaque paragraphe
-                   - Évite absolument les blocs de texte denses
+                1. Structure Markdown :
+                   - Utilise des titres avec ## pour les sections principales
+                   - Utilise des sous-titres avec ### pour les sous-sections
+                   - Mets en **gras** les points importants
+                   - Utilise *l'italique* pour l'emphase
+                   - Crée des listes avec - ou 1. 2. 3.
+                   - Utilise des blocs de code avec ```langage pour le code
+                   - Utilise > pour les citations
 
-                2. Mise en forme :
-                   - Utilise des listes à puces pour énumérer des points
-                   - Ajoute des sous-titres pour séparer les sections importantes
-                   - Indente les exemples ou citations
+                2. Mise en page :
+                   - Sépare TOUJOURS les paragraphes par une ligne vide
+                   - Limite chaque paragraphe à 2-3 phrases
+                   - Utilise des listes à puces pour les énumérations
+                   - Ajoute des liens [texte](url) si pertinent
 
-                3. Lisibilité :
-                   - Commence chaque nouvelle idée sur une nouvelle ligne
-                   - Utilise des sauts de ligne pour aérer le texte
-                   - Privilégie les phrases courtes et concises
+                3. Style de réponse :
+                   - Structure tes réponses avec des sections claires
+                   - Commence par une brève introduction
+                   - Développe les points principaux
+                   - Termine par une conclusion ou une question
 
-                4. Style conversationnel :
-                   - Adopte un ton amical mais professionnel
+                4. Ton et interaction :
+                   - Reste amical et professionnel
                    - Pose des questions pour encourager l'interaction
-                   - Utilise des émojis avec modération pour agrémenter tes réponses
+                   - Utilise des émojis avec modération
 
                 IMPORTANT : La lisibilité et l'espacement sont PRIORITAIRES.
                 EOT,
@@ -153,12 +159,15 @@ class ChatService
 
     public function generateTitle($messages)
     {
-        $prompt = "En te basant sur cette conversation, génère un titre court et pertinent (max 60 caractères) qui résume le sujet principal. Réponds uniquement avec le titre, sans guillemets ni ponctuation supplémentaire.";
+        $prompt = "Génère un titre court et concis (max 40 caractères) qui résume l'échange suivant. Le titre doit être clair et pertinent. Réponds uniquement avec le titre, sans ponctuation ni guillemets.";
 
         $response = $this->sendMessage(
-            messages: array_merge($messages, [
-                ['role' => 'user', 'content' => $prompt]
-            ]),
+            messages: array_merge([
+                [
+                    'role' => 'system',
+                    'content' => $prompt
+                ]
+            ], $messages),
             model: 'gpt-3.5-turbo'
         );
 

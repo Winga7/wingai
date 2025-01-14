@@ -2,7 +2,6 @@
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 import { computed } from 'vue';
-import CodeBlock from './CodeBlock.vue';
 import 'highlight.js/styles/github-dark.css';
 
 const props = defineProps({
@@ -14,41 +13,23 @@ const props = defineProps({
 
 const md = new MarkdownIt({
     html: true,
-    breaks: true,
     linkify: true,
+    typographer: true,
     highlight: function (str, lang) {
         if (lang && hljs.getLanguage(lang)) {
             try {
-                return `<code-block code="${encodeURIComponent(str)}" language="${lang}"></code-block>`;
+                return hljs.highlight(str, { language: lang }).value;
             } catch (__) {}
         }
-        return `<code-block code="${encodeURIComponent(str)}"></code-block>`;
+        return '';
     }
 });
 
-const renderedContent = computed(() => md.render(props.content));
+const renderedContent = computed(() => {
+    return md.render(props.content);
+});
 </script>
 
 <template>
-    <div class="markdown-response">
-        <div class="prose dark:prose-invert max-w-none" v-html="renderedContent"></div>
-    </div>
+    <div class="prose dark:prose-invert max-w-none" v-html="renderedContent"></div>
 </template>
-
-<style>
-.markdown-response {
-    @apply p-6 rounded-lg bg-white dark:bg-gray-800 shadow-sm;
-}
-
-.prose pre {
-    @apply m-0;
-}
-
-.prose code {
-    @apply bg-transparent p-0;
-}
-
-.code-block-wrapper {
-    @apply rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700;
-}
-</style>
