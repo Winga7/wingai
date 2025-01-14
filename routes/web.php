@@ -4,6 +4,7 @@ use App\Http\Controllers\AskController;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
+use App\Http\Controllers\ChatController;
 
 Route::get('/', function () {
     return Inertia::render('Welcome', [
@@ -14,29 +15,13 @@ Route::get('/', function () {
     ]);
 });
 
-Route::middleware([
-    'auth:sanctum',
-    config('jetstream.auth_session'),
-    'verified',
-])->group(function () {
+Route::middleware(['auth:sanctum', config('jetstream.auth_session'), 'verified'])->group(function () {
     Route::get('/dashboard', function () {
         return Inertia::render('Dashboard');
     })->name('dashboard');
 
     Route::get('/ask', [AskController::class, 'index'])->name('ask.index');
-    Route::post('/ask', [AskController::class, 'ask'])->name('ask.post');
-});
-
-Route::middleware(['auth:sanctum', config('jetstream.auth_session'), 'verified'])->group(function () {
-    Route::get('/chat', function () {
-        return Inertia::render('Chat/Index', [
-            'models' => [
-                ['id' => 'gpt-4', 'name' => 'GPT-4'],
-                ['id' => 'gpt-3.5-turbo', 'name' => 'GPT-3.5 Turbo'],
-            ],
-            'selectedModel' => 'gpt-3.5-turbo'
-        ]);
-    })->name('chat');
-
-    Route::post('/chat/ask', [AskController::class, 'handle'])->name('chat.ask');
+    Route::post('/ask', [AskController::class, 'ask'])->name('ask.store');
+    Route::post('/conversations', [ChatController::class, 'store'])->name('chat.store');
+    Route::delete('/conversations/{conversation}', [ChatController::class, 'destroy'])->name('conversations.destroy');
 });

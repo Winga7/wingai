@@ -1,162 +1,153 @@
 <script setup>
-import { ref, computed, watch } from 'vue';
-import { useForm, usePage } from '@inertiajs/vue3';
+import { ref, computed } from 'vue';
+import { useForm, router } from '@inertiajs/vue3';
 import AppLayout from '@/Layouts/AppLayout.vue';
-import MarkdownRenderer from '@/Components/MarkdownRenderer.vue';
-import InputLabel from '@/Components/InputLabel.vue';
-import TextInput from '@/Components/TextInput.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
-import InputError from '@/Components/InputError.vue';
 import ChatHistory from '@/Components/ChatHistory.vue';
-import QuestionSuggestions from '@/Components/QuestionSuggestions.vue';
-import TypingIndicator from '@/Components/TypingIndicator.vue';
 import CharacterCount from '@/Components/CharacterCount.vue';
-import CodeBlock from '@/Components/CodeBlock.vue';
-import CopyableText from '@/Components/CopyableText.vue';
+
 
 const props = defineProps({
     models: Array,
     selectedModel: String,
+    conversations: Array,
+    currentConversation: Object,
+    messages: Array
 });
 
-const page = usePage();
+const messages = ref(props.messages || []);
 const form = useForm({
     message: '',
-    model: props.selectedModel
+    model: props.selectedModel,
+    conversation_id: props.currentConversation?.id || null
 });
 
-const response = ref('');
-const error = ref('');
-const isTyping = ref(false);
-const MAX_MESSAGE_LENGTH = 4000;
-
-watch(() => page.props.flash, (newFlash) => {
-    if (newFlash?.message) {
-        response.value = newFlash.message;
-    }
-    if (newFlash?.error) {
-        error.value = newFlash.error;
-    }
-}, { deep: true });
-
-const submit = () => {
-    if (form.processing || !form.message.trim() || form.message.length > MAX_MESSAGE_LENGTH) {
-        return;
-    }
-
-    isTyping.value = true;
-    form.post(route('ask.post'), {
+const handleSelectConversation = (conversation) => {
+    router.get(route('ask.index', { conversation_id: conversation.id }), {}, {
+        preserveState: true,
         preserveScroll: true,
-        onSuccess: () => {
-            form.reset('message');
-            isTyping.value = false;
-        },
-        onError: () => {
-            isTyping.value = false;
+        only: ['messages', 'currentConversation']
+    });
+    messages.value = conversation.messages || [];
+    form.conversation_id = conversation.id;
+};
+
+const handleSubmit = async () => {
+    form.post(route('ask.store'), {
+        preserveScroll: true,
+        onSuccess: (response) => {
+            if (response.props.flash.message) {
+                messages.value.push({
+                    role: 'user',
+                    content: form.message
+                });
+                messages.value.push({
+                    role: 'assistant',
+                    content: response.props.flash.message
+                });
+                form.message = '';
+            }
         }
     });
 };
 
-const handleSuggestionSelect = (suggestion) => {
-    form.message = suggestion;
-};
-
 const handleKeydown = (e) => {
-    if (e.key === 'Enter') {
-        if (!e.shiftKey) {
-            e.preventDefault();
-            if (!form.processing && form.message.trim()) {
-                submit();
-            }
-        }
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleSubmit();
     }
 };
 
-const isSubmitDisabled = computed(() => {
-    return form.processing ||
-           !form.message.trim() ||
-           form.message.length > MAX_MESSAGE_LENGTH;
-});
+const handleModelChange = (event) => {
+    form.model = event.target.value;
+};
 </script>
 
 <template>
-    <AppLayout title="Chat IA">
+    <AppLayout title="Chat avec Kon-chan">
         <template #header>
             <h2 class="font-semibold text-xl text-gray-800 dark:text-gray-200 leading-tight">
                 Chat IA
             </h2>
         </template>
 
-        <div class="py-12">
-            <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
-                <div class="flex gap-6">
-                    <!-- Sidebar avec historique -->
-                    <div class="hidden lg:block w-64">
-                        <ChatHistory :messages="[]" @select="handleSuggestionSelect" />
-                    </div>
+        <div class="flex h-[calc(100vh-64px)]">
+            <!-- Sidebar -->
+            <div class="hidden lg:block w-64 border-r border-gray-200 dark:border-gray-700">
+                <ChatHistory
+                    :conversations="conversations"
+                    :current-conversation="currentConversation"
+                    @select-conversation="handleSelectConversation"
+                />
+            </div>
 
-                    <!-- Contenu principal -->
-                    <div class="flex-1">
-                        <div class="bg-white dark:bg-gray-800 overflow-hidden shadow-xl sm:rounded-lg p-6">
-                            <!-- Suggestions de questions -->
-                            <QuestionSuggestions
-                                v-if="!response && !form.message"
-                                @select="handleSuggestionSelect"
-                            />
+            <!-- Main Content -->
+            <div class="flex-1 flex flex-col">
+                <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Modèle
+                    </label>
+                    <select
+                        v-model="form.model"
+                        @change="handleModelChange"
+                        class="mt-1 block w-full max-w-xs rounded-md border-gray-300 dark:border-gray-700 dark:bg-gray-900"
+                    >
+                        <option v-for="model in models" :key="model.id" :value="model.id">
+                            {{ model.name }}
+                        </option>
+                    </select>
+                </div>
 
-                            <form @submit.prevent="submit" class="space-y-4">
-                                <div class="grid grid-cols-1 gap-6">
-                                    <!-- Sélection du modèle -->
-                                    <div>
-                                        <InputLabel for="model" value="Modèle" />
-                                        <select
-                                            id="model"
-                                            v-model="form.model"
-                                            class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
-                                        >
-                                            <option v-for="model in models" :key="model.id" :value="model.id">
-                                                {{ model.name }}
-                                            </option>
-                                        </select>
-                                        <InputError :message="form.errors.model" class="mt-2" />
-                                    </div>
-
-                                    <!-- Message -->
-                                    <div class="relative">
-                                        <textarea
-                                            id="message"
-                                            v-model="form.message"
-                                            rows="4"
-                                            @keydown="handleKeydown"
-                                            :disabled="form.processing"
-                                            class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 disabled:opacity-50"
-                                            :placeholder="form.processing ? 'En attente de réponse...' : 'Posez votre question... (Entrée pour envoyer, Shift+Entrée pour sauter une ligne)'"
-                                        ></textarea>
-                                        <CharacterCount :text="form.message" :max-length="MAX_MESSAGE_LENGTH" />
-                                    </div>
-
-                                    <div class="flex items-center justify-between">
-                                        <TypingIndicator :is-typing="isTyping" />
-                                        <PrimaryButton
-                                            :disabled="isSubmitDisabled"
-                                            :class="{ 'opacity-25': isSubmitDisabled }"
-                                        >
-                                            Envoyer
-                                        </PrimaryButton>
-                                    </div>
+                <!-- Messages Container -->
+                <div class="flex-1 overflow-y-auto p-4 space-y-6">
+                    <div v-for="(message, index) in messages"
+                         :key="index"
+                         :class="[
+                             message.role === 'user'
+                                 ? 'bg-blue-50 dark:bg-blue-900/20 ml-auto max-w-[80%]'
+                                 : 'bg-gray-50 dark:bg-gray-900/50 mr-auto max-w-[80%]',
+                             'p-4 rounded-lg shadow-sm'
+                         ]"
+                    >
+                        <div class="flex items-start gap-4">
+                            <div class="shrink-0">
+                                <div :class="[
+                                    message.role === 'user'
+                                        ? 'bg-blue-100 dark:bg-blue-800'
+                                        : 'bg-purple-100 dark:bg-purple-800',
+                                    'p-2 rounded-full'
+                                ]">
+                                    <span class="text-sm font-medium">
+                                        {{ message.role === 'user' ? 'Vous' : 'Kon-chan' }}
+                                    </span>
                                 </div>
-                            </form>
-
-                            <!-- Affichage de la réponse -->
-                            <div v-if="error" class="mt-6 p-4 bg-red-50 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg">
-                                {{ error }}
                             </div>
-
-                            <div v-if="response" class="mt-6 prose dark:prose-invert max-w-none">
-                                <MarkdownRenderer :content="response" />
+                            <div class="prose dark:prose-invert max-w-none">
+                                {{ message.content }}
                             </div>
                         </div>
                     </div>
+                </div>
+
+                <!-- Input Form -->
+                <div class="border-t border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800">
+                    <form @submit.prevent="handleSubmit" class="max-w-4xl mx-auto">
+                        <div class="flex flex-col space-y-4">
+                            <textarea
+                                v-model="form.message"
+                                @keydown="handleKeydown"
+                                rows="3"
+                                class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900"
+                                placeholder="Posez votre question... (Entrée pour envoyer, Shift+Entrée pour sauter une ligne)"
+                            ></textarea>
+                            <div class="flex justify-between items-center">
+                                <CharacterCount :text="form.message" :max="4000" />
+                                <PrimaryButton type="submit" :disabled="form.processing">
+                                    Envoyer
+                                </PrimaryButton>
+                            </div>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>
