@@ -33,10 +33,11 @@ const deleteConversation = (e, conversationId) => {
 
 const newConversation = () => {
     router.post(route('conversations.store'), {
-        model: 'gpt-3.5-turbo'
+        model: 'mistralai/mistral-7b-instruct'
     }, {
-        preserveState: true,
-        preserveScroll: true
+        onSuccess: (response) => {
+            router.get(route('ask.index', { conversation_id: response.data.id }));
+        }
     });
 };
 

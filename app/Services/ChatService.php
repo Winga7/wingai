@@ -9,7 +9,7 @@ class ChatService
     private $baseUrl;
     private $apiKey;
     private $client;
-    public const DEFAULT_MODEL = 'meta-llama/llama-3.2-11b-vision-instruct:free';
+    public const DEFAULT_MODEL = 'mistralai/mistral-7b-instruct';
 
     public function __construct()
     {
@@ -30,27 +30,46 @@ class ChatService
     public function getModels(): array
     {
         return cache()->remember('openai.models', now()->addHour(), function () {
-            $response = Http::withHeaders([
-                'Authorization' => 'Bearer ' . $this->apiKey,
-            ])->get($this->baseUrl . '/models');
+            try {
+                $response = Http::withHeaders([
+                    'Authorization' => 'Bearer ' . $this->apiKey,
+                ])->get($this->baseUrl . '/models');
 
-            return collect($response->json()['data'])
-                ->filter(function ($model) {
-                    return str_ends_with($model['id'], ':free');
-                })
-                ->sortBy('name')
-                ->map(function ($model) {
-                    return [
-                        'id' => $model['id'],
-                        'name' => $model['name'],
-                        'context_length' => $model['context_length'],
-                        'max_completion_tokens' => $model['top_provider']['max_completion_tokens'],
-                        'pricing' => $model['pricing'],
-                    ];
-                })
-                ->values()
-                ->all()
-            ;
+                if (!$response->successful()) {
+                    logger()->error('Erreur lors de la récupération des modèles:', [
+                        'status' => $response->status(),
+                        'body' => $response->body()
+                    ]);
+                    return [[
+                        'id' => self::DEFAULT_MODEL,
+                        'name' => 'Mistral: Mistral 7B Instruct (free)'
+                    ]];
+                }
+
+                $models = $response->json('data', []);
+
+                return collect($models)
+                    ->filter(function ($model) {
+                        return ($model['pricing']['prompt'] === 0 && $model['pricing']['completion'] === 0);
+                    })
+                    ->map(function ($model) {
+                        return [
+                            'id' => $model['id'],
+                            'name' => $model['name'] . ' (free)'
+                        ];
+                    })
+                    ->values()
+                    ->all();
+            } catch (\Exception $e) {
+                logger()->error('Exception lors de la récupération des modèles:', [
+                    'message' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                return [[
+                    'id' => self::DEFAULT_MODEL,
+                    'name' => 'Mistral: Mistral 7B Instruct (free)'
+                ]];
+            }
         });
     }
 
@@ -159,7 +178,7 @@ class ChatService
 
     public function generateTitle($messages)
     {
-        $prompt = "Génère un titre court et concis (max 40 caractères) qui résume l'échange suivant. Le titre doit être clair et pertinent. Réponds uniquement avec le titre, sans ponctuation ni guillemets.";
+        $prompt = "Crée un titre ultra court (3 à 5 mots maximum) qui résume l'essence de cet échange. Ne réponds qu'avec le titre, sans ponctuation ni guillemets.";
 
         $response = $this->sendMessage(
             messages: array_merge([
@@ -168,7 +187,7 @@ class ChatService
                     'content' => $prompt
                 ]
             ], $messages),
-            model: 'gpt-3.5-turbo'
+            model: self::DEFAULT_MODEL
         );
 
         return trim($response);
