@@ -31,12 +31,14 @@ class ChatService
     {
         return cache()->remember('openai.models', now()->addHour(), function () {
             try {
+                logger()->info('Fetching models from OpenRouter API');
                 $response = Http::withHeaders([
                     'Authorization' => 'Bearer ' . $this->apiKey,
+                    'HTTP-Referer' => config('app.url')
                 ])->get($this->baseUrl . '/models');
 
                 if (!$response->successful()) {
-                    logger()->error('Erreur lors de la récupération des modèles:', [
+                    logger()->error('Error fetching models:', [
                         'status' => $response->status(),
                         'body' => $response->body()
                     ]);
@@ -47,21 +49,27 @@ class ChatService
                 }
 
                 $models = $response->json('data', []);
+                logger()->debug('Raw models:', ['models' => $models]);
 
                 return collect($models)
                     ->filter(function ($model) {
-                        return ($model['pricing']['prompt'] === 0 && $model['pricing']['completion'] === 0);
+                        // Vérifie si le modèle a une structure de prix et si les prix sont à 0
+                        return isset($model['pricing']) &&
+                            isset($model['pricing']['prompt']) &&
+                            isset($model['pricing']['completion']) &&
+                            (float)$model['pricing']['prompt'] === 0.0 &&
+                            (float)$model['pricing']['completion'] === 0.0;
                     })
                     ->map(function ($model) {
                         return [
                             'id' => $model['id'],
-                            'name' => $model['name'] . ' (free)'
+                            'name' => $model['name'] . ' (gratuit)'
                         ];
                     })
                     ->values()
                     ->all();
             } catch (\Exception $e) {
-                logger()->error('Exception lors de la récupération des modèles:', [
+                logger()->error('Exception in getModels:', [
                     'message' => $e->getMessage(),
                     'trace' => $e->getTraceAsString()
                 ]);
