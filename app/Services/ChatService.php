@@ -63,7 +63,7 @@ class ChatService
                     ->map(function ($model) {
                         return [
                             'id' => $model['id'],
-                            'name' => $model['name'] . ' (gratuit)'
+                            'name' => $model['name'] . ''
                         ];
                     })
                     ->values()
@@ -186,7 +186,17 @@ class ChatService
 
     public function generateTitle($messages)
     {
-        $prompt = "Crée un titre ultra court (3 à 5 mots maximum) qui résume l'essence de cet échange. Ne réponds qu'avec le titre, sans ponctuation ni guillemets.";
+        $prompt = "Crée un titre court (3-4 mots) qui résume UNIQUEMENT la question posée, sans ajouter d'interprétation ni de question supplémentaire.
+        Exemples:
+        - Question: 'Quel est la nintendo la plus vendu?' → 'Console Nintendo plus vendue'
+        - Question: 'Comment fonctionne React?' → 'Fonctionnement React'
+        - Question: 'Quels sont les meilleurs langages de programmation?' → 'Meilleurs langages programmation'
+
+        IMPORTANT:
+        - Ne JAMAIS ajouter de questions
+        - Ne JAMAIS ajouter d'émojis
+        - Utiliser UNIQUEMENT les mots de la question originale
+        - Répondre uniquement avec le titre, sans ponctuation ni article";
 
         $response = $this->sendMessage(
             messages: array_merge([

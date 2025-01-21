@@ -12,7 +12,7 @@ class AskController extends Controller
     public function index(Request $request)
     {
         $models = (new ChatService())->getModels();
-        $selectedModel = ChatService::DEFAULT_MODEL;
+        $selectedModel = auth()->user()->preferred_model ?? ChatService::DEFAULT_MODEL;
         $conversations = auth()->user()->conversations()
             ->latest()
             ->with('messages')
@@ -72,10 +72,11 @@ class AskController extends Controller
 
             // Mise à jour du titre après la première interaction complète
             if ($conversation->messages()->count() === 2) {
-                $title = (new ChatService())->generateTitle([
+                $chatService = new ChatService();
+                $title = $chatService->generateTitle([
                     [
                         'role' => 'user',
-                        'content' => $conversation->messages()->where('role', 'user')->first()->content
+                        'content' => $request->message
                     ],
                     [
                         'role' => 'assistant',

@@ -30,7 +30,7 @@ class ChatController extends Controller
     {
         $conversation = auth()->user()->conversations()->create([
             'title' => 'Nouvelle conversation',
-            'model' => $request->model ?? ChatService::DEFAULT_MODEL
+            'model' => $request->model ?? auth()->user()->preferred_model ?? ChatService::DEFAULT_MODEL
         ]);
 
         return redirect()->route('chat.show', $conversation);

@@ -11,7 +11,8 @@ const props = defineProps({
     conversations: Array,
     currentConversation: Object,
     messages: Array,
-    models: Array
+    models: Array,
+    selectedModel: String
 });
 
 const messages = ref(props.messages || []);
@@ -19,7 +20,7 @@ const messages = ref(props.messages || []);
 const form = useForm({
     message: '',
     conversation_id: props.currentConversation?.id,
-    model: props.currentConversation?.model || 'gpt-3.5-turbo'
+    model: props.currentConversation?.model || props.selectedModel || 'mistralai/mistral-7b-instruct'
 });
 
 const handleSelectConversation = (conversation) => {

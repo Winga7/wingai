@@ -33,11 +33,7 @@ const deleteConversation = (e, conversationId) => {
 
 const newConversation = () => {
     router.post(route('conversations.store'), {
-        model: 'mistralai/mistral-7b-instruct'
-    }, {
-        onSuccess: (response) => {
-            router.get(route('ask.index', { conversation_id: response.data.id }));
-        }
+        model: props.currentConversation?.model || auth?.user?.preferred_model || 'mistralai/mistral-7b-instruct'
     });
 };
 
