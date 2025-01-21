@@ -184,20 +184,48 @@ class ChatService
         ];
     }
 
+    // public function generateTitle($messages)
+    // {
+    //     $prompt = "Crée un titre court (3-4 mots) qui résume UNIQUEMENT la question posée, sans ajouter d'interprétation ni de question supplémentaire.
+    //     Exemples:
+    //     - Question: 'Quel est la nintendo la plus vendu?' → 'Console Nintendo plus vendue'
+    //     - Question: 'Comment fonctionne React?' → 'Fonctionnement React'
+    //     - Question: 'Quels sont les meilleurs langages de programmation?' → 'Meilleurs langages programmation'
+
+    //     IMPORTANT:
+    //     - Ne JAMAIS ajouter de questions
+    //     - Utiliser UNIQUEMENT les mots de la question originale
+    //     - Ne pas mettre la réponse dans le titre
+    //     - Répondre uniquement avec le titre, sans ponctuation ni article";
+
+    //     $response = $this->sendMessage(
+    //         messages: array_merge([
+    //             [
+    //                 'role' => 'system',
+    //                 'content' => $prompt
+    //             ]
+    //         ], $messages),
+    //         model: self::DEFAULT_MODEL
+    //     );
+
+    //     return trim($response);
+    // }
     public function generateTitle($messages)
     {
-        $prompt = "Crée un titre court (3-4 mots) qui résume UNIQUEMENT la question posée, sans ajouter d'interprétation ni de question supplémentaire.
-        Exemples:
-        - Question: 'Quel est la nintendo la plus vendu?' → 'Console Nintendo plus vendue'
-        - Question: 'Comment fonctionne React?' → 'Fonctionnement React'
-        - Question: 'Quels sont les meilleurs langages de programmation?' → 'Meilleurs langages programmation'
+        $prompt = "Crée un titre court (3-4 mots) qui résume UNIQUEMENT la question posée, en ignorant toute réponse ou information supplémentaire.
 
-        IMPORTANT:
-        - Ne JAMAIS ajouter de questions
-        - Ne JAMAIS ajouter d'émojis
-        - Utiliser UNIQUEMENT les mots de la question originale
-        - Répondre uniquement avec le titre, sans ponctuation ni article";
+    Exemples :
+    - Question : 'Quel est le smartphone le plus vendu ?' → 'Smartphone plus vendu'
+    - Question : 'Comment fonctionne Laravel ?' → 'Fonctionnement Laravel'
+    - Question : 'Quels sont les meilleurs jeux vidéo ?' → 'Meilleurs jeux vidéo'
 
+    Règles importantes :
+    - Ne JAMAIS ajouter de réponse dans le titre.
+    - Utiliser uniquement les mots de la question originale.
+    - Pas de ponctuation, pas d'articles comme 'le', 'la', 'les'.
+    - Réponds uniquement avec le titre généré.";
+
+        // Fusionner le prompt avec les messages existants en mettant le prompt en premier
         $response = $this->sendMessage(
             messages: array_merge([
                 [
@@ -205,9 +233,24 @@ class ChatService
                     'content' => $prompt
                 ]
             ], $messages),
-            model: self::DEFAULT_MODEL
+            model: self::DEFAULT_MODEL // Utilisation du modèle configuré
         );
 
-        return trim($response);
+        return $this->sanitizeTitle(trim($response));
+    }
+
+    // Fonction pour nettoyer et ajuster le titre généré si nécessaire
+    private function sanitizeTitle($title)
+    {
+        // Supprimer la ponctuation et les caractères spéciaux inutiles
+        $title = preg_replace('/[^a-zA-Z0-9\sàâäéèêëïîôöùûüç]/u', '', $title);
+
+        // Limiter à 4 mots maximum
+        $words = explode(' ', $title);
+        if (count($words) > 10) {
+            $title = implode(' ', array_slice($words, 0, 4));
+        }
+
+        return trim($title);
     }
 }

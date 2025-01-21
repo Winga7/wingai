@@ -57,6 +57,19 @@ class AskController extends Controller
                 'model' => $request->model
             ]);
 
+            // Générer le titre dès le premier message
+            if ($conversation->messages()->count() === 1) {
+                $chatService = new ChatService();
+                $title = $chatService->generateTitle([
+                    [
+                        'role' => 'user',
+                        'content' => $request->message
+                    ]
+                ]);
+
+                $conversation->update(['title' => $title]);
+            }
+
             $response = (new ChatService())->sendMessage(
                 messages: $conversation->messages()->orderBy('created_at')->get()->map(function ($msg) {
                     return ['role' => $msg->role, 'content' => $msg->content];
@@ -69,23 +82,6 @@ class AskController extends Controller
                 'role' => 'assistant',
                 'model' => $request->model
             ]);
-
-            // Mise à jour du titre après la première interaction complète
-            if ($conversation->messages()->count() === 2) {
-                $chatService = new ChatService();
-                $title = $chatService->generateTitle([
-                    [
-                        'role' => 'user',
-                        'content' => $request->message
-                    ],
-                    [
-                        'role' => 'assistant',
-                        'content' => $response
-                    ]
-                ]);
-
-                $conversation->update(['title' => $title]);
-            }
 
             return redirect()->back()
                 ->with('message', $response)
