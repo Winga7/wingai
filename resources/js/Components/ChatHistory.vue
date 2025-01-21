@@ -12,6 +12,10 @@ const props = defineProps({
     currentConversation: {
         type: Object,
         default: null
+    },
+    selectedModel: {
+        type: String,
+        default: null
     }
 });
 
@@ -31,9 +35,11 @@ const deleteConversation = (e, conversationId) => {
     }
 };
 
-const newConversation = () => {
-    router.post(route('conversations.store'), {
-        model: props.currentConversation?.model || auth?.user?.preferred_model || 'mistralai/mistral-7b-instruct'
+const createNewConversation = () => {
+    router.post('/chat', {
+        model: props.selectedModel
+    }, {
+        preserveState: false  // Forcer un rechargement complet
     });
 };
 
@@ -52,7 +58,7 @@ const formatDate = (date) => {
             <h2 class="text-lg font-medium text-gray-900 dark:text-gray-100">
                 Historique des conversations
             </h2>
-            <button @click="newConversation" class="mt-4 w-full">
+            <button @click="createNewConversation" class="mt-4 w-full">
                 <PrimaryButton class="w-full justify-center">
                     Nouvelle conversation
                 </PrimaryButton>

@@ -33,7 +33,7 @@ class ChatController extends Controller
             'model' => $request->model ?? auth()->user()->preferred_model ?? ChatService::DEFAULT_MODEL
         ]);
 
-        return redirect()->route('chat.show', $conversation);
+        return redirect()->route('ask.index', ['conversation_id' => $conversation->id]);
     }
 
     public function show(Conversation $conversation)

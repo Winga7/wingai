@@ -20,7 +20,7 @@ const messages = ref(props.messages || []);
 const form = useForm({
     message: '',
     conversation_id: props.currentConversation?.id,
-    model: props.currentConversation?.model || props.selectedModel || 'mistralai/mistral-7b-instruct'
+    model: props.currentConversation?.model || props.selectedModel
 });
 
 const handleSelectConversation = (conversation) => {
@@ -31,6 +31,7 @@ const handleSelectConversation = (conversation) => {
     });
     messages.value = conversation.messages || [];
     form.conversation_id = conversation.id;
+    form.model = conversation.model || props.selectedModel;
 };
 
 const handleSubmit = async () => {
@@ -97,10 +98,19 @@ const markdownToHtml = (content) => {
                         @change="handleModelChange"
                         class="mt-1 block w-full max-w-xs rounded-md border-gray-300 dark:border-gray-700 dark:bg-gray-900"
                     >
-                        <option v-for="model in models" :key="model.id" :value="model.id">
+                        <option
+                            v-for="model in models"
+                            :key="model.id"
+                            :value="model.id"
+                        >
                             {{ model.name }}
                         </option>
                     </select>
+
+                    <!-- Ajout d'un texte d'information -->
+                    <div class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                        Modèle actuel : {{ models.find(m => m.id === form.model)?.name || form.model }}
+                    </div>
                 </div>
 
                 <!-- Messages Container -->
