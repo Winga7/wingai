@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
+use App\Events\ChatMessageStreamed;
 
 class ChatService
 {
@@ -90,6 +91,17 @@ class ChatService
      */
     public function sendMessage(array $messages, string $model = null, float $temperature = 0.7): string
     {
+        $lastMessage = end($messages);
+
+        // Si c'est une commande slash
+        if (str_starts_with($lastMessage['content'], '/')) {
+            return $this->handleSlashCommand($lastMessage['content']);
+        }
+
+        // Ajouter le contexte de personnalisation
+        $systemMessage = $this->getSystemMessage();
+        array_unshift($messages, $systemMessage);
+
         try {
             logger()->info('Envoi du message', [
                 'model' => $model,
@@ -252,5 +264,168 @@ class ChatService
         }
 
         return trim($title);
+    }
+
+    private function getDefaultCommands(): array
+    {
+        return [
+            [
+                'command' => '/help',
+                'description' => 'Affiche la liste des commandes disponibles',
+                'prompt' => 'Liste toutes les commandes disponibles avec leur description'
+            ],
+            [
+                'command' => '/meteo',
+                'description' => 'Affiche la météo pour une ville',
+                'prompt' => 'Donne la météo actuelle pour la ville mentionnée. Format: /meteo [ville]'
+            ],
+            [
+                'command' => '/resume',
+                'description' => 'Résume un texte',
+                'prompt' => 'Fais un résumé concis du texte fourni en gardant les points essentiels'
+            ]
+        ];
+    }
+
+    private function handleSlashCommand(string $message): string
+    {
+        $parts = explode(' ', trim($message));
+        $command = $parts[0];
+        $args = array_slice($parts, 1);
+
+        // Fusionner les commandes par défaut avec les commandes personnalisées
+        $allCommands = array_merge(
+            $this->getDefaultCommands(),
+            auth()->user()->iaPersonalization?->slash_commands ?? []
+        );
+
+        if ($command === '/help') {
+            return $this->generateHelpMessage($allCommands);
+        }
+
+        foreach ($allCommands as $cmd) {
+            if ($cmd['command'] === $command) {
+                return $this->sendMessage([
+                    ['role' => 'system', 'content' => $cmd['prompt']],
+                    ['role' => 'user', 'content' => implode(' ', $args)]
+                ]);
+            }
+        }
+
+        return "Commande non reconnue. Tapez /help pour voir la liste des commandes disponibles.";
+    }
+
+    private function generateHelpMessage(array $commands): string
+    {
+        $helpText = "## Commandes disponibles\n\n";
+        foreach ($commands as $cmd) {
+            $helpText .= "- **{$cmd['command']}** : {$cmd['description']}\n";
+        }
+        return $helpText;
+    }
+
+    private function getSystemMessage(): array
+    {
+        $user = auth()->user();
+        $personalization = $user->iaPersonalization;
+        $now = now()->format('Y-m-d H:i:s');
+
+        $systemContent = "Tu es Kon-chan, un assistant de chat amical et organisé. ";
+        $systemContent .= "La date et l'heure actuelle est le {$now}. ";
+        $systemContent .= "Tu es actuellement en conversation avec {$user->name}. ";
+
+        // Ajouter l'identité et le comportement personnalisés
+        if ($personalization) {
+            if ($personalization->identity) {
+                $systemContent .= "\nContexte utilisateur : {$personalization->identity}";
+            }
+            if ($personalization->behavior) {
+                $systemContent .= "\nComportement attendu : {$personalization->behavior}";
+            }
+        }
+
+        return [
+            'role' => 'system',
+            'content' => $systemContent
+        ];
+    }
+
+    public function streamConversation(array $messages, ?string $model = null, float $temperature = 0.7, $conversation)
+    {
+        try {
+            logger()->info('Début streamConversation', [
+                'model' => $model,
+                'temperature' => $temperature,
+                'conversation_id' => $conversation->id
+            ]);
+
+            $models = collect($this->getModels());
+            if (!$model || !$models->contains('id', $model)) {
+                $model = self::DEFAULT_MODEL;
+                logger()->info('Modèle par défaut utilisé:', ['model' => $model]);
+            }
+
+            $messages = [$this->getChatSystemPrompt(), ...$messages];
+            $channelName = "chat.{$conversation->id}";
+
+            logger()->info('Configuration du stream', [
+                'channel' => $channelName,
+                'messages_count' => count($messages)
+            ]);
+
+            $stream = $this->client->chat()->createStreamed([
+                'model' => $model,
+                'messages' => $messages,
+                'temperature' => $temperature,
+            ]);
+
+            $fullResponse = '';
+
+            foreach ($stream as $response) {
+                if (isset($response->choices[0]->delta->content)) {
+                    $chunk = $response->choices[0]->delta->content;
+                    $fullResponse .= $chunk;
+
+                    logger()->info('Envoi chunk', [
+                        'chunk_length' => strlen($chunk),
+                        'channel' => $channelName
+                    ]);
+
+                    broadcast(new ChatMessageStreamed(
+                        channel: $channelName,
+                        content: $chunk,
+                        isComplete: false
+                    ));
+                }
+            }
+
+            logger()->info('Stream terminé', [
+                'full_response_length' => strlen($fullResponse),
+                'channel' => $channelName
+            ]);
+
+            broadcast(new ChatMessageStreamed(
+                channel: $channelName,
+                content: $fullResponse,
+                isComplete: true,
+                error: false
+            ));
+
+            return $fullResponse;
+        } catch (\Exception $e) {
+            logger()->error('Erreur dans streamConversation:', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            broadcast(new ChatMessageStreamed(
+                channel: $channelName,
+                content: $fullResponse . "Erreur: " . $e->getMessage(),
+                isComplete: true,
+                error: true
+            ));
+
+            throw $e;
+        }
     }
 }

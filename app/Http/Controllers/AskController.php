@@ -26,12 +26,15 @@ class AskController extends Controller
             $messages = $currentConversation ? $currentConversation->messages->sortBy('created_at')->values() : [];
         }
 
+        $personalization = auth()->user()->iaPersonalization;
+
         return Inertia::render('Ask/Index', [
             'models' => $models,
             'selectedModel' => $selectedModel,
             'conversations' => $conversations,
             'currentConversation' => $currentConversation,
-            'messages' => $messages
+            'messages' => $messages,
+            'personalization' => $personalization
         ]);
     }
 
@@ -88,6 +91,68 @@ class AskController extends Controller
                 ->with('conversation', $conversation);
         } catch (\Exception $e) {
             return redirect()->back()->with('error', 'Erreur: ' . $e->getMessage());
+        }
+    }
+
+    public function streamMessage(Conversation $conversation, Request $request)
+    {
+        $request->validate([
+            'message' => 'required|string',
+            'model'   => 'nullable|string',
+        ]);
+
+        try {
+            // Sauvegarder le message utilisateur
+            $conversation->messages()->create([
+                'content' => $request->input('message'),
+                'role'    => 'user',
+                'model'   => $request->model
+            ]);
+
+            // Créer le message assistant vide avant de commencer le stream
+            $assistantMessage = $conversation->messages()->create([
+                'content' => '',
+                'role'    => 'assistant',
+                'model'   => $request->model
+            ]);
+
+            // Récupérer l'historique des messages
+            $messages = $conversation->messages()
+                ->orderBy('created_at', 'asc')
+                ->get()
+                ->map(fn($msg) => [
+                    'role'    => $msg->role,
+                    'content' => $msg->content,
+                ])
+                ->toArray();
+
+            // Générer le titre si premier message
+            if ($conversation->messages()->count() === 1) {
+                $title = (new ChatService())->generateTitle([
+                    [
+                        'role' => 'user',
+                        'content' => $request->message
+                    ]
+                ]);
+                $conversation->update(['title' => $title]);
+            }
+
+            // Lancer le stream
+            $response = (new ChatService())->streamConversation(
+                messages: $messages,
+                model: $request->model,
+                temperature: 0.7,
+                conversation: $conversation
+            );
+
+            // Mettre à jour le message assistant avec la réponse complète
+            $assistantMessage->update([
+                'content' => $response
+            ]);
+
+            return response()->json(['status' => 'success']);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 }
