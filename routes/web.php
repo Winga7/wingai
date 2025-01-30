@@ -37,4 +37,13 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session'), 'verified']
 
     Route::get('/ia/personalization', [IaPersonalizationController::class, 'index'])->name('ia.personalization.index');
     Route::post('/ia/personalization', [IaPersonalizationController::class, 'store'])->name('ia.personalization.store');
+
+    Route::get('/broadcast-test', function () {
+        broadcast(new \App\Events\TestBroadcast("Ceci est un test de broadcast !"));
+        return "Événement envoyé !";
+    })->middleware(['auth']);
+
+    Route::get('/broadcast-test-page', function () {
+        return Inertia::render('BroadcastTestPage');
+    })->name('broadcast.test.page');
 });
