@@ -7,23 +7,23 @@ use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Broadcasting\PrivateChannel;
 
 class ChatMessageStreamed implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public function __construct(
-        protected string $channel,
-        protected string $content,
-        protected bool $isComplete = false,
-        protected bool $error = false
+        public string $channel,
+        public ?string $content,
+        public bool $isComplete,
+        public ?string $title = null,
+        public bool $error = false
     ) {}
 
     public function broadcastOn(): array
     {
-        return [
-            new Channel($this->channel),
-        ];
+        return [new PrivateChannel($this->channel)];
     }
 
     public function broadcastAs(): string

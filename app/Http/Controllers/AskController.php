@@ -155,4 +155,26 @@ class AskController extends Controller
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
+
+    // Nouvelle fonction séparée pour la génération du titre
+    private function generateConversationTitle($message)
+    {
+        if (!$message) return 'Nouvelle conversation';
+
+        $chatService = new ChatService();
+        return $chatService->generateTitle([
+            [
+                'role' => 'user',
+                'content' => $message
+            ]
+        ]);
+    }
+
+    // Nouvelle méthode pour la mise à jour du titre
+    public function updateTitle(Request $request, Conversation $conversation)
+    {
+        $conversation->update(['title' => $request->title]);
+
+        return response()->json(['success' => true]);
+    }
 }

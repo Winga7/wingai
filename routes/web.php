@@ -25,6 +25,7 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session'), 'verified']
     Route::get('/ask', [AskController::class, 'index'])->name('ask.index');
     Route::post('/ask', [AskController::class, 'ask'])->name('ask.store');
     Route::post('/ask/{conversation}/stream', [AskController::class, 'streamMessage'])->name('ask.stream');
+    Route::post('/ask/{conversation}/update-title', [AskController::class, 'updateTitle'])->name('ask.updateTitle');
 
     // Routes pour le chat
     Route::get('/chat', [ChatController::class, 'index'])->name('chat.index');

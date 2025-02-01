@@ -353,6 +353,27 @@ class ChatService
     public function streamConversation(array $messages, ?string $model = null, float $temperature = 0.7, $conversation)
     {
         try {
+            // Si c'est le premier message, générer et envoyer le titre
+            if ($conversation->messages()->count() === 1) {
+                $title = $this->generateTitle([
+                    [
+                        'role' => 'user',
+                        'content' => end($messages)['content']
+                    ]
+                ]);
+
+                // Mettre à jour le titre dans la base de données
+                $conversation->update(['title' => $title]);
+
+                // Envoyer le titre via le stream
+                broadcast(new ChatMessageStreamed(
+                    channel: "chat.{$conversation->id}",
+                    content: '',
+                    isComplete: false,
+                    title: $title
+                ));
+            }
+
             logger()->info('Début streamConversation', [
                 'model' => $model,
                 'temperature' => $temperature,
