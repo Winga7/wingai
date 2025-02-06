@@ -25,6 +25,7 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session'), 'verified']
     Route::get('/ask', [AskController::class, 'index'])->name('ask.index');
     Route::post('/ask', [AskController::class, 'ask'])->name('ask.store');
     Route::post('/ask/{conversation}/stream', [AskController::class, 'streamMessage'])->name('ask.stream');
+    Route::post('/ask/{conversation}/update-title', [AskController::class, 'updateTitle'])->name('ask.updateTitle');
 
     // Routes pour le chat
     Route::get('/chat', [ChatController::class, 'index'])->name('chat.index');
@@ -37,4 +38,13 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session'), 'verified']
 
     Route::get('/ia/personalization', [IaPersonalizationController::class, 'index'])->name('ia.personalization.index');
     Route::post('/ia/personalization', [IaPersonalizationController::class, 'store'])->name('ia.personalization.store');
+
+    Route::get('/broadcast-test', function () {
+        broadcast(new \App\Events\TestBroadcast("Ceci est un test de broadcast !"));
+        return "Événement envoyé !";
+    })->middleware(['auth']);
+
+    Route::get('/broadcast-test-page', function () {
+        return Inertia::render('BroadcastTestPage');
+    })->name('broadcast.test.page');
 });
