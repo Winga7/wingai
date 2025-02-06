@@ -273,7 +273,7 @@ watch(
     <AppLayout title="Chat avec Kon-chan">
         <template #header>
             <h2
-                class="font-semibold text-xl text-gray-800 dark:text-gray-200 leading-tight"
+                class="text-xl font-semibold leading-tight text-gray-800 dark:text-gray-200"
             >
                 Chat IA
             </h2>
@@ -284,10 +284,11 @@ watch(
             <div class="relative flex">
                 <div
                     v-show="isSidebarOpen"
-                    class="w-64 border-r border-gray-200 dark:border-gray-700 transition-transform duration-300"
+                    class="w-64 transition-transform duration-300 border-r border-gray-200 dark:border-gray-700"
                 >
                     <ChatHistory
                         :conversations="conversations"
+                        :selectedModel="form.model"
                         :current-conversation="currentConversation"
                         @select-conversation="handleSelectConversation"
                     />
@@ -296,7 +297,7 @@ watch(
                 <!-- Bouton avec nouvelle fonction toggleSidebar -->
                 <button
                     @click="toggleSidebar"
-                    class="absolute top-1/2 -right-6 transform -translate-y-1/2 flex items-center justify-center w-6 h-12 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded-r z-10"
+                    class="absolute z-10 flex items-center justify-center w-6 h-12 transform -translate-y-1/2 bg-gray-100 rounded-r top-1/2 -right-6 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700"
                 >
                     <component
                         :is="isSidebarOpen ? ChevronLeftIcon : ChevronRightIcon"
@@ -306,10 +307,10 @@ watch(
             </div>
 
             <!-- Main Content -->
-            <div class="flex-1 flex flex-col">
+            <div class="flex flex-col flex-1">
                 <!-- Model selector -->
                 <div
-                    class="p-2 border-b border-gray-200 dark:border-gray-700 flex items-center gap-4"
+                    class="flex items-center gap-4 p-2 border-b border-gray-200 dark:border-gray-700"
                 >
                     <div class="flex items-center gap-2">
                         <label
@@ -320,7 +321,7 @@ watch(
                         <select
                             v-model="form.model"
                             @change="handleModelChange"
-                            class="rounded-md border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
+                            class="text-sm border-gray-300 rounded-md dark:border-gray-700 dark:bg-gray-900"
                         >
                             <option
                                 v-for="model in models"
@@ -344,7 +345,7 @@ watch(
                 <div
                     ref="messagesContainer"
                     @scroll="handleScroll"
-                    class="flex-1 overflow-y-auto p-4 space-y-4 relative"
+                    class="relative flex-1 p-4 space-y-4 overflow-y-auto"
                 >
                     <div
                         v-for="(message, index) in localMessages"
@@ -383,14 +384,14 @@ watch(
                 <button
                     v-show="showScrollButton"
                     @click="scrollToBottom"
-                    class="fixed bottom-24 right-8 p-2 bg-gray-100 dark:bg-gray-800 rounded-full shadow-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-all"
+                    class="fixed p-2 transition-all bg-gray-100 rounded-full shadow-lg bottom-24 right-8 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
                 >
                     <ChevronDownIcon class="w-6 h-6 text-gray-500" />
                 </button>
 
                 <!-- Input Form -->
                 <div
-                    class="border-t border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800"
+                    class="p-4 bg-white border-t border-gray-200 dark:border-gray-700 dark:bg-gray-800"
                 >
                     <div class="relative max-w-4xl mx-auto">
                         <SlashCommandAutocomplete
@@ -407,11 +408,11 @@ watch(
                                 v-model="form.message"
                                 @keydown="handleKeydown"
                                 rows="2"
-                                class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
+                                class="w-full text-sm border-gray-300 rounded-lg dark:border-gray-700 dark:bg-gray-900"
                                 placeholder="Tapez / pour les commandes. Entrée pour envoyer, Maj+Entrée pour nouvelle ligne"
                             ></textarea>
                             <div
-                                class="flex justify-between items-center text-xs text-gray-500"
+                                class="flex items-center justify-between text-xs text-gray-500"
                             >
                                 <div class="flex gap-4">
                                     <CharacterCount
@@ -426,7 +427,7 @@ watch(
                                 <PrimaryButton
                                     type="submit"
                                     :disabled="form.processing"
-                                    class="py-1 px-3"
+                                    class="px-3 py-1"
                                 >
                                     Envoyer
                                 </PrimaryButton>

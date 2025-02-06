@@ -10,7 +10,7 @@ class ChatService
     private $baseUrl;
     private $apiKey;
     private $client;
-    public const DEFAULT_MODEL = 'mistralai/mistral-7b-instruct';
+    public const DEFAULT_MODEL = 'mistralai/mistral-7b-instruct:free';
 
     public function __construct()
     {

@@ -38,61 +38,62 @@ class AskController extends Controller
         ]);
     }
 
-    public function ask(Request $request)
-    {
-        $request->validate([
-            'message' => 'required|string',
-            'model' => 'required|string',
-            'conversation_id' => 'nullable|exists:conversations,id'
-        ]);
+    // public function ask(Request $request)
+    // {
+    //     dd($request->all());
+    //     $request->validate([
+    //         'message' => 'required|string',
+    //         'model' => 'required|string',
+    //         'conversation_id' => 'nullable|exists:conversations,id'
+    //     ]);
 
-        try {
-            $conversation = $request->conversation_id
-                ? Conversation::find($request->conversation_id)
-                : auth()->user()->conversations()->create([
-                    'title' => 'Nouvelle conversation',
-                    'model' => $request->model
-                ]);
+    //     try {
+    //         $conversation = $request->conversation_id
+    //             ? Conversation::find($request->conversation_id)
+    //             : auth()->user()->conversations()->create([
+    //                 'title' => 'Nouvelle conversation',
+    //                 'model' => $request->model
+    //             ]);
 
-            $message = $conversation->messages()->create([
-                'content' => $request->message,
-                'role' => 'user',
-                'model' => $request->model
-            ]);
+    //         $message = $conversation->messages()->create([
+    //             'content' => $request->message,
+    //             'role' => 'user',
+    //             'model' => $request->model
+    //         ]);
 
-            // Générer le titre dès le premier message
-            if ($conversation->messages()->count() === 1) {
-                $chatService = new ChatService();
-                $title = $chatService->generateTitle([
-                    [
-                        'role' => 'user',
-                        'content' => $request->message
-                    ]
-                ]);
+    //         // Générer le titre dès le premier message
+    //         if ($conversation->messages()->count() === 1) {
+    //             $chatService = new ChatService();
+    //             $title = $chatService->generateTitle([
+    //                 [
+    //                     'role' => 'user',
+    //                     'content' => $request->message
+    //                 ]
+    //             ]);
 
-                $conversation->update(['title' => $title]);
-            }
+    //             $conversation->update(['title' => $title]);
+    //         }
 
-            $response = (new ChatService())->sendMessage(
-                messages: $conversation->messages()->orderBy('created_at')->get()->map(function ($msg) {
-                    return ['role' => $msg->role, 'content' => $msg->content];
-                })->toArray(),
-                model: $request->model
-            );
+    //         $response = (new ChatService())->sendMessage(
+    //             messages: $conversation->messages()->orderBy('created_at')->get()->map(function ($msg) {
+    //                 return ['role' => $msg->role, 'content' => $msg->content];
+    //             })->toArray(),
+    //             model: $request->model
+    //         );
 
-            $conversation->messages()->create([
-                'content' => $response,
-                'role' => 'assistant',
-                'model' => $request->model
-            ]);
+    //         $conversation->messages()->create([
+    //             'content' => $response,
+    //             'role' => 'assistant',
+    //             'model' => $request->model
+    //         ]);
 
-            return redirect()->back()
-                ->with('message', $response)
-                ->with('conversation', $conversation);
-        } catch (\Exception $e) {
-            return redirect()->back()->with('error', 'Erreur: ' . $e->getMessage());
-        }
-    }
+    //         return redirect()->back()
+    //             ->with('message', $response)
+    //             ->with('conversation', $conversation);
+    //     } catch (\Exception $e) {
+    //         return redirect()->back()->with('error', 'Erreur: ' . $e->getMessage());
+    //     }
+    // }
 
     public function streamMessage(Conversation $conversation, Request $request)
     {
@@ -126,8 +127,9 @@ class AskController extends Controller
                 ])
                 ->toArray();
 
+            $conversation->update(['model' => $request->input('model')]);
             // Générer le titre si premier message
-            if ($conversation->messages()->count() === 1) {
+            if ($conversation->messages()->count() === 2) {
                 $title = (new ChatService())->generateTitle([
                     [
                         'role' => 'user',
