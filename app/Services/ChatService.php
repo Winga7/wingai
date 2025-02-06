@@ -7,159 +7,206 @@ use App\Events\ChatMessageStreamed;
 
 class ChatService
 {
-    private $baseUrl;
-    private $apiKey;
-    private $client;
-    public const DEFAULT_MODEL = 'mistralai/mistral-7b-instruct:free';
+  private $baseUrl;
+  private $apiKey;
+  private $client;
+  public const DEFAULT_MODEL = 'mistralai/mistral-7b-instruct:free';
 
-    public function __construct()
-    {
-        $this->baseUrl = config('services.openrouter.base_url', 'https://openrouter.ai/api/v1');
-        $this->apiKey = config('services.openrouter.api_key');
-        $this->client = $this->createOpenAIClient();
-    }
+  public function __construct()
+  {
+    $this->baseUrl = config('services.openrouter.base_url', 'https://openrouter.ai/api/v1');
+    $this->apiKey = config('services.openrouter.api_key');
+    $this->client = $this->createOpenAIClient();
+  }
 
-    /**
-     * @return array<array-key, array{
-     *     id: string,
-     *     name: string,
-     *     context_length: int,
-     *     max_completion_tokens: int,
-     *     pricing: array{prompt: int, completion: int}
-     * }>
-     */
-    public function getModels(): array
-    {
-        return cache()->remember('openai.models', now()->addHour(), function () {
-            try {
-                logger()->info('Fetching models from OpenRouter API');
-                $response = Http::withHeaders([
-                    'Authorization' => 'Bearer ' . $this->apiKey,
-                    'HTTP-Referer' => config('app.url')
-                ])->get($this->baseUrl . '/models');
+  /**
+   * @return array<array-key, array{
+   *     id: string,
+   *     name: string,
+   *     context_length: int,
+   *     max_completion_tokens: int,
+   *     pricing: array{prompt: int, completion: int}
+   * }>
+   */
+  public function getModels(): array
+  {
+    return cache()->remember('openai.models', now()->addHour(), function () {
+      try {
+        logger()->info('Fetching models from OpenRouter API');
+        $response = Http::withHeaders([
+          'Authorization' => 'Bearer ' . $this->apiKey,
+          'HTTP-Referer' => config('app.url')
+        ])->get($this->baseUrl . '/models');
 
-                if (!$response->successful()) {
-                    logger()->error('Error fetching models:', [
-                        'status' => $response->status(),
-                        'body' => $response->body()
-                    ]);
-                    return [[
-                        'id' => self::DEFAULT_MODEL,
-                        'name' => 'Mistral: Mistral 7B Instruct (free)'
-                    ]];
-                }
-
-                $models = $response->json('data', []);
-                logger()->debug('Raw models:', ['models' => $models]);
-
-                return collect($models)
-                    ->filter(function ($model) {
-                        // Vérifie si le modèle a une structure de prix et si les prix sont à 0
-                        return isset($model['pricing']) &&
-                            isset($model['pricing']['prompt']) &&
-                            isset($model['pricing']['completion']) &&
-                            (float)$model['pricing']['prompt'] === 0.0 &&
-                            (float)$model['pricing']['completion'] === 0.0;
-                    })
-                    ->map(function ($model) {
-                        return [
-                            'id' => $model['id'],
-                            'name' => $model['name'] . ''
-                        ];
-                    })
-                    ->values()
-                    ->all();
-            } catch (\Exception $e) {
-                logger()->error('Exception in getModels:', [
-                    'message' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString()
-                ]);
-                return [[
-                    'id' => self::DEFAULT_MODEL,
-                    'name' => 'Mistral: Mistral 7B Instruct (free)'
-                ]];
-            }
-        });
-    }
-
-    /**
-     * @param array{role: 'user'|'assistant'|'system'|'function', content: string} $messages
-     * @param string|null $model
-     * @param float $temperature
-     *
-     * @return string
-     */
-    public function sendMessage(array $messages, string $model = null, float $temperature = 0.7): string
-    {
-        $lastMessage = end($messages);
-
-        // Si c'est une commande slash
-        if (str_starts_with($lastMessage['content'], '/')) {
-            return $this->handleSlashCommand($lastMessage['content']);
+        if (!$response->successful()) {
+          logger()->error('Error fetching models:', [
+            'status' => $response->status(),
+            'body' => $response->body()
+          ]);
+          return [[
+            'id' => self::DEFAULT_MODEL,
+            'name' => 'Mistral: Mistral 7B Instruct (free)'
+          ]];
         }
 
-        // Ajouter le contexte de personnalisation
-        $systemMessage = $this->getSystemMessage();
-        array_unshift($messages, $systemMessage);
+        $models = $response->json('data', []);
+        logger()->debug('Raw models:', ['models' => $models]);
 
-        try {
-            logger()->info('Envoi du message', [
-                'model' => $model,
-                'temperature' => $temperature,
-            ]);
+        return collect($models)
+          ->filter(function ($model) {
+            // Vérifie si le modèle a une structure de prix et si les prix sont à 0
+            return isset($model['pricing']) &&
+              isset($model['pricing']['prompt']) &&
+              isset($model['pricing']['completion']) &&
+              (float)$model['pricing']['prompt'] === 0.0 &&
+              (float)$model['pricing']['completion'] === 0.0;
+          })
+          ->map(function ($model) {
+            return [
+              'id' => $model['id'],
+              'name' => $model['name'] . ''
+            ];
+          })
+          ->values()
+          ->all();
+      } catch (\Exception $e) {
+        logger()->error('Exception in getModels:', [
+          'message' => $e->getMessage(),
+          'trace' => $e->getTraceAsString()
+        ]);
+        return [[
+          'id' => self::DEFAULT_MODEL,
+          'name' => 'Mistral: Mistral 7B Instruct (free)'
+        ]];
+      }
+    });
+  }
 
-            $models = collect($this->getModels());
-            if (!$model || !$models->contains('id', $model)) {
-                $model = self::DEFAULT_MODEL;
-                logger()->info('Modèle par défaut utilisé:', ['model' => $model]);
-            }
+  /**
+   * @param array{role: 'user'|'assistant'|'system'|'function', content: string} $messages
+   * @param string|null $model
+   * @param float $temperature
+   *
+   * @return string
+   */
+  public function sendMessage(array $messages, string $model = null, float $temperature = 0.7): string
+  {
+    $lastMessage = end($messages);
 
-            $messages = [$this->getChatSystemPrompt(), ...$messages];
-            $response = $this->client->chat()->create([
-                'model' => $model,
-                'messages' => $messages,
-                'temperature' => $temperature,
-            ]);
-
-            logger()->info('Réponse reçue:', ['response' => $response]);
-
-            $content = $response->choices[0]->message->content;
-
-            return $content;
-        } catch (\Exception $e) {
-            if ($e->getMessage() === 'Undefined array key "choices"') {
-                throw new \Exception("Limite de messages atteinte");
-            }
-
-            logger()->error('Erreur dans sendMessage:', [
-                'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-
-            throw $e;
-        }
+    // Si c'est une commande slash
+    if (str_starts_with($lastMessage['content'], '/')) {
+      return $this->handleSlashCommand($lastMessage['content']);
     }
 
-    private function createOpenAIClient(): \OpenAI\Client
-    {
-        return \OpenAI::factory()
-            ->withApiKey($this->apiKey)
-            ->withBaseUri($this->baseUrl)
-            ->make()
-        ;
+    // Ajouter le contexte de personnalisation
+    $systemMessage = $this->getSystemMessage();
+    array_unshift($messages, $systemMessage);
+
+    try {
+      logger()->info('Envoi du message', [
+        'model' => $model,
+        'temperature' => $temperature,
+      ]);
+
+      $models = collect($this->getModels());
+      if (!$model || !$models->contains('id', $model)) {
+        $model = self::DEFAULT_MODEL;
+        logger()->info('Modèle par défaut utilisé:', ['model' => $model]);
+      }
+
+      $messages = [$this->getChatSystemPrompt(), ...$messages];
+      $response = $this->client->chat()->create([
+        'model' => $model,
+        'messages' => $messages,
+        'temperature' => $temperature,
+      ]);
+
+      logger()->info('Réponse reçue:', ['response' => $response]);
+
+      $content = $response->choices[0]->message->content;
+
+      return $content;
+    } catch (\Exception $e) {
+      if ($e->getMessage() === 'Undefined array key "choices"') {
+        throw new \Exception("Limite de messages atteinte");
+      }
+
+      logger()->error('Erreur dans sendMessage:', [
+        'message' => $e->getMessage(),
+        'trace' => $e->getTraceAsString(),
+      ]);
+
+      throw $e;
     }
+  }
 
-    /**
-     * @return array{role: 'system', content: string}
-     */
-    private function getChatSystemPrompt(): array
-    {
-        $user = auth()->user();
-        $now = now()->locale('fr')->format('l d F Y H:i');
+  public function changeTitle(array $messages, string $model = null, float $temperature = 0.7): string
+  {
+    // $lastMessage = end($messages);
 
-        return [
-            'role' => 'system',
-            'content' => <<<EOT
+    // Si c'est une commande slash
+    // if (str_starts_with($lastMessage['content'], '/')) {
+    //   return $this->handleSlashCommand($lastMessage['content']);
+    // }
+
+    try {
+      logger()->info('Changement de titre', [
+        'model' => $model,
+        'temperature' => $temperature,
+      ]);
+
+      $models = collect($this->getModels());
+      if (!$model || !$models->contains('id', $model)) {
+        $model = self::DEFAULT_MODEL;
+        logger()->info('Modèle par défaut utilisé:', ['model' => $model]);
+      }
+
+      $messages = [$this->getTitleMessagePrompt(), ...$messages];
+      $response = $this->client->chat()->create([
+        'model' => $model,
+        'messages' => $messages,
+        'temperature' => $temperature,
+      ]);
+
+      logger()->info('Titre reçue:', ['response' => $response]);
+
+      $content = $response->choices[0]->message->content;
+
+      return $content;
+    } catch (\Exception $e) {
+      if ($e->getMessage() === 'Undefined array key "choices"') {
+        throw new \Exception("Limite de messages atteinte");
+      }
+
+      logger()->error('Erreur dans sendMessage:', [
+        'message' => $e->getMessage(),
+        'trace' => $e->getTraceAsString(),
+      ]);
+
+      throw $e;
+    }
+  }
+
+  private function createOpenAIClient(): \OpenAI\Client
+  {
+    return \OpenAI::factory()
+      ->withApiKey($this->apiKey)
+      ->withBaseUri($this->baseUrl)
+      ->make()
+    ;
+  }
+
+  /**
+   * @return array{role: 'system', content: string}
+   */
+  private function getChatSystemPrompt(): array
+  {
+    $user = auth()->user();
+    $now = now()->locale('fr')->format('l d F Y H:i');
+
+    return [
+      'role' => 'system',
+      'content' => <<<EOT
                 Tu es Kon-chan, un assistant de chat amical et organisé. La date et l'heure actuelle est le {$now}.
                 Tu es actuellement en conversation avec {$user->name}.
 
@@ -193,260 +240,240 @@ class ChatService
 
                 IMPORTANT : La lisibilité et l'espacement sont PRIORITAIRES.
                 EOT,
-        ];
+    ];
+  }
+
+  private function getTitleMessagePrompt(): array
+  {
+    return [
+      'role' => 'system',
+      'content' => <<<EOT
+                 Crée un titre court (3-8 mots) qui résume UNIQUEMENT la question posée, en ignorant toute réponse ou information supplémentaire.
+
+                Règles importantes :
+                 - Ne JAMAIS ajouter de réponse dans le titre.
+                 - Utiliser uniquement les mots de la question originale.
+                 - Pas de ponctuation, pas d'articles comme 'le', 'la', 'les'.
+                 - Réponds uniquement avec le titre généré.
+                 - Met les titres dans la langue de la question.
+
+                Exemples :
+                - Smartphone plus vendu
+                - Fonctionnement Laravel
+                - Meilleurs jeux vidéo
+
+                EOT,
+
+    ];
+  }
+
+  public function generateTitle($messages)
+  {
+    // Fusionner le prompt avec les messages existants en mettant le prompt en premier
+    $response = $this->changeTitle(
+      $messages,
+      model: self::DEFAULT_MODEL // Utilisation du modèle configuré
+    );
+
+    return $this->sanitizeTitle(trim($response));
+  }
+
+  // Fonction pour nettoyer et ajuster le titre généré si nécessaire
+  private function sanitizeTitle($title)
+  {
+    // Supprimer la ponctuation et les caractères spéciaux inutiles
+    $title = preg_replace('/[^a-zA-Z0-9\sàâäéèêëïîôöùûüç]/u', '', $title);
+
+    // Limiter à 4 mots maximum
+    $words = explode(' ', $title);
+    if (count($words) > 10) {
+      $title = implode(' ', array_slice($words, 0, 4));
     }
 
-    // public function generateTitle($messages)
-    // {
-    //     $prompt = "Crée un titre court (3-4 mots) qui résume UNIQUEMENT la question posée, sans ajouter d'interprétation ni de question supplémentaire.
-    //     Exemples:
-    //     - Question: 'Quel est la nintendo la plus vendu?' → 'Console Nintendo plus vendue'
-    //     - Question: 'Comment fonctionne React?' → 'Fonctionnement React'
-    //     - Question: 'Quels sont les meilleurs langages de programmation?' → 'Meilleurs langages programmation'
+    return trim($title);
+  }
 
-    //     IMPORTANT:
-    //     - Ne JAMAIS ajouter de questions
-    //     - Utiliser UNIQUEMENT les mots de la question originale
-    //     - Ne pas mettre la réponse dans le titre
-    //     - Répondre uniquement avec le titre, sans ponctuation ni article";
+  private function getDefaultCommands(): array
+  {
+    return [
+      [
+        'command' => '/help',
+        'description' => 'Affiche la liste des commandes disponibles',
+        'prompt' => 'Liste toutes les commandes disponibles avec leur description'
+      ],
+      [
+        'command' => '/meteo',
+        'description' => 'Affiche la météo pour une ville',
+        'prompt' => 'Donne la météo actuelle pour la ville mentionnée. Format: /meteo [ville]'
+      ],
+      [
+        'command' => '/resume',
+        'description' => 'Résume un texte',
+        'prompt' => 'Fais un résumé concis du texte fourni en gardant les points essentiels'
+      ]
+    ];
+  }
 
-    //     $response = $this->sendMessage(
-    //         messages: array_merge([
-    //             [
-    //                 'role' => 'system',
-    //                 'content' => $prompt
-    //             ]
-    //         ], $messages),
-    //         model: self::DEFAULT_MODEL
-    //     );
+  private function handleSlashCommand(string $message): string
+  {
+    $parts = explode(' ', trim($message));
+    $command = $parts[0];
+    $args = array_slice($parts, 1);
 
-    //     return trim($response);
-    // }
-    public function generateTitle($messages)
-    {
-        $prompt = "Crée un titre court (3-4 mots) qui résume UNIQUEMENT la question posée, en ignorant toute réponse ou information supplémentaire.
+    // Fusionner les commandes par défaut avec les commandes personnalisées
+    $allCommands = array_merge(
+      $this->getDefaultCommands(),
+      auth()->user()->iaPersonalization?->slash_commands ?? []
+    );
 
-    Exemples :
-    - Question : 'Quel est le smartphone le plus vendu ?' → 'Smartphone plus vendu'
-    - Question : 'Comment fonctionne Laravel ?' → 'Fonctionnement Laravel'
-    - Question : 'Quels sont les meilleurs jeux vidéo ?' → 'Meilleurs jeux vidéo'
-
-    Règles importantes :
-    - Ne JAMAIS ajouter de réponse dans le titre.
-    - Utiliser uniquement les mots de la question originale.
-    - Pas de ponctuation, pas d'articles comme 'le', 'la', 'les'.
-    - Réponds uniquement avec le titre généré.";
-
-        // Fusionner le prompt avec les messages existants en mettant le prompt en premier
-        $response = $this->sendMessage(
-            messages: array_merge([
-                [
-                    'role' => 'system',
-                    'content' => $prompt
-                ]
-            ], $messages),
-            model: self::DEFAULT_MODEL // Utilisation du modèle configuré
-        );
-
-        return $this->sanitizeTitle(trim($response));
+    if ($command === '/help') {
+      return $this->generateHelpMessage($allCommands);
     }
 
-    // Fonction pour nettoyer et ajuster le titre généré si nécessaire
-    private function sanitizeTitle($title)
-    {
-        // Supprimer la ponctuation et les caractères spéciaux inutiles
-        $title = preg_replace('/[^a-zA-Z0-9\sàâäéèêëïîôöùûüç]/u', '', $title);
+    foreach ($allCommands as $cmd) {
+      if ($cmd['command'] === $command) {
+        return $this->sendMessage([
+          ['role' => 'system', 'content' => $cmd['prompt']],
+          ['role' => 'user', 'content' => implode(' ', $args)]
+        ]);
+      }
+    }
 
-        // Limiter à 4 mots maximum
-        $words = explode(' ', $title);
-        if (count($words) > 10) {
-            $title = implode(' ', array_slice($words, 0, 4));
+    return "Commande non reconnue. Tapez /help pour voir la liste des commandes disponibles.";
+  }
+
+  private function generateHelpMessage(array $commands): string
+  {
+    $helpText = "## Commandes disponibles\n\n";
+    foreach ($commands as $cmd) {
+      $helpText .= "- **{$cmd['command']}** : {$cmd['description']}\n";
+    }
+    return $helpText;
+  }
+
+  private function getSystemMessage(): array
+  {
+    $user = auth()->user();
+    $personalization = $user->iaPersonalization;
+    $now = now()->format('Y-m-d H:i:s');
+
+    $systemContent = "Tu es Kon-chan, un assistant de chat amical et organisé. ";
+    $systemContent .= "La date et l'heure actuelle est le {$now}. ";
+    $systemContent .= "Tu es actuellement en conversation avec {$user->name}. ";
+
+    // Ajouter l'identité et le comportement personnalisés
+    if ($personalization) {
+      if ($personalization->identity) {
+        $systemContent .= "\nContexte utilisateur : {$personalization->identity}";
+      }
+      if ($personalization->behavior) {
+        $systemContent .= "\nComportement attendu : {$personalization->behavior}";
+      }
+    }
+
+    return [
+      'role' => 'system',
+      'content' => $systemContent
+    ];
+  }
+
+  public function streamConversation(array $messages, ?string $model = null, float $temperature = 0.7, $conversation)
+  {
+    try {
+      // Si c'est le premier message, générer et envoyer le titre
+      if ($conversation->messages()->count() === 1) {
+        $title = $this->generateTitle([
+          [
+            'role' => 'user',
+            'content' => end($messages)['content']
+          ]
+        ]);
+
+        // Mettre à jour le titre dans la base de données
+        $conversation->update(['title' => $title]);
+
+        // Envoyer le titre via le stream
+        broadcast(new ChatMessageStreamed(
+          channel: "chat.{$conversation->id}",
+          content: '',
+          isComplete: false,
+          title: $title
+        ));
+      }
+
+      logger()->info('Début streamConversation', [
+        'model' => $model,
+        'temperature' => $temperature,
+        'conversation_id' => $conversation->id
+      ]);
+
+      $models = collect($this->getModels());
+      if (!$model || !$models->contains('id', $model)) {
+        $model = self::DEFAULT_MODEL;
+        logger()->info('Modèle par défaut utilisé:', ['model' => $model]);
+      }
+
+      $messages = [$this->getChatSystemPrompt(), ...$messages];
+      $channelName = "chat.{$conversation->id}";
+
+      logger()->info('Configuration du stream', [
+        'channel' => $channelName,
+        'messages_count' => count($messages)
+      ]);
+
+      $stream = $this->client->chat()->createStreamed([
+        'model' => $model,
+        'messages' => $messages,
+        'temperature' => $temperature,
+      ]);
+
+      $fullResponse = '';
+
+      foreach ($stream as $response) {
+        if (isset($response->choices[0]->delta->content)) {
+          $chunk = $response->choices[0]->delta->content;
+          $fullResponse .= $chunk;
+
+          logger()->info('Envoi chunk', [
+            'chunk_length' => strlen($chunk),
+            'channel' => $channelName
+          ]);
+
+          broadcast(new ChatMessageStreamed(
+            channel: $channelName,
+            content: $chunk,
+            isComplete: false
+          ));
         }
+      }
 
-        return trim($title);
+      logger()->info('Stream terminé', [
+        'full_response_length' => strlen($fullResponse),
+        'channel' => $channelName
+      ]);
+
+      broadcast(new ChatMessageStreamed(
+        channel: $channelName,
+        content: $fullResponse,
+        isComplete: true,
+        error: false
+      ));
+
+      return $fullResponse;
+    } catch (\Exception $e) {
+      logger()->error('Erreur dans streamConversation:', [
+        'message' => $e->getMessage(),
+        'trace' => $e->getTraceAsString(),
+      ]);
+
+      broadcast(new ChatMessageStreamed(
+        channel: $channelName,
+        content: $fullResponse . "Erreur: " . $e->getMessage(),
+        isComplete: true,
+        error: true
+      ));
+
+      throw $e;
     }
-
-    private function getDefaultCommands(): array
-    {
-        return [
-            [
-                'command' => '/help',
-                'description' => 'Affiche la liste des commandes disponibles',
-                'prompt' => 'Liste toutes les commandes disponibles avec leur description'
-            ],
-            [
-                'command' => '/meteo',
-                'description' => 'Affiche la météo pour une ville',
-                'prompt' => 'Donne la météo actuelle pour la ville mentionnée. Format: /meteo [ville]'
-            ],
-            [
-                'command' => '/resume',
-                'description' => 'Résume un texte',
-                'prompt' => 'Fais un résumé concis du texte fourni en gardant les points essentiels'
-            ]
-        ];
-    }
-
-    private function handleSlashCommand(string $message): string
-    {
-        $parts = explode(' ', trim($message));
-        $command = $parts[0];
-        $args = array_slice($parts, 1);
-
-        // Fusionner les commandes par défaut avec les commandes personnalisées
-        $allCommands = array_merge(
-            $this->getDefaultCommands(),
-            auth()->user()->iaPersonalization?->slash_commands ?? []
-        );
-
-        if ($command === '/help') {
-            return $this->generateHelpMessage($allCommands);
-        }
-
-        foreach ($allCommands as $cmd) {
-            if ($cmd['command'] === $command) {
-                return $this->sendMessage([
-                    ['role' => 'system', 'content' => $cmd['prompt']],
-                    ['role' => 'user', 'content' => implode(' ', $args)]
-                ]);
-            }
-        }
-
-        return "Commande non reconnue. Tapez /help pour voir la liste des commandes disponibles.";
-    }
-
-    private function generateHelpMessage(array $commands): string
-    {
-        $helpText = "## Commandes disponibles\n\n";
-        foreach ($commands as $cmd) {
-            $helpText .= "- **{$cmd['command']}** : {$cmd['description']}\n";
-        }
-        return $helpText;
-    }
-
-    private function getSystemMessage(): array
-    {
-        $user = auth()->user();
-        $personalization = $user->iaPersonalization;
-        $now = now()->format('Y-m-d H:i:s');
-
-        $systemContent = "Tu es Kon-chan, un assistant de chat amical et organisé. ";
-        $systemContent .= "La date et l'heure actuelle est le {$now}. ";
-        $systemContent .= "Tu es actuellement en conversation avec {$user->name}. ";
-
-        // Ajouter l'identité et le comportement personnalisés
-        if ($personalization) {
-            if ($personalization->identity) {
-                $systemContent .= "\nContexte utilisateur : {$personalization->identity}";
-            }
-            if ($personalization->behavior) {
-                $systemContent .= "\nComportement attendu : {$personalization->behavior}";
-            }
-        }
-
-        return [
-            'role' => 'system',
-            'content' => $systemContent
-        ];
-    }
-
-    public function streamConversation(array $messages, ?string $model = null, float $temperature = 0.7, $conversation)
-    {
-        try {
-            // Si c'est le premier message, générer et envoyer le titre
-            if ($conversation->messages()->count() === 1) {
-                $title = $this->generateTitle([
-                    [
-                        'role' => 'user',
-                        'content' => end($messages)['content']
-                    ]
-                ]);
-
-                // Mettre à jour le titre dans la base de données
-                $conversation->update(['title' => $title]);
-
-                // Envoyer le titre via le stream
-                broadcast(new ChatMessageStreamed(
-                    channel: "chat.{$conversation->id}",
-                    content: '',
-                    isComplete: false,
-                    title: $title
-                ));
-            }
-
-            logger()->info('Début streamConversation', [
-                'model' => $model,
-                'temperature' => $temperature,
-                'conversation_id' => $conversation->id
-            ]);
-
-            $models = collect($this->getModels());
-            if (!$model || !$models->contains('id', $model)) {
-                $model = self::DEFAULT_MODEL;
-                logger()->info('Modèle par défaut utilisé:', ['model' => $model]);
-            }
-
-            $messages = [$this->getChatSystemPrompt(), ...$messages];
-            $channelName = "chat.{$conversation->id}";
-
-            logger()->info('Configuration du stream', [
-                'channel' => $channelName,
-                'messages_count' => count($messages)
-            ]);
-
-            $stream = $this->client->chat()->createStreamed([
-                'model' => $model,
-                'messages' => $messages,
-                'temperature' => $temperature,
-            ]);
-
-            $fullResponse = '';
-
-            foreach ($stream as $response) {
-                if (isset($response->choices[0]->delta->content)) {
-                    $chunk = $response->choices[0]->delta->content;
-                    $fullResponse .= $chunk;
-
-                    logger()->info('Envoi chunk', [
-                        'chunk_length' => strlen($chunk),
-                        'channel' => $channelName
-                    ]);
-
-                    broadcast(new ChatMessageStreamed(
-                        channel: $channelName,
-                        content: $chunk,
-                        isComplete: false
-                    ));
-                }
-            }
-
-            logger()->info('Stream terminé', [
-                'full_response_length' => strlen($fullResponse),
-                'channel' => $channelName
-            ]);
-
-            broadcast(new ChatMessageStreamed(
-                channel: $channelName,
-                content: $fullResponse,
-                isComplete: true,
-                error: false
-            ));
-
-            return $fullResponse;
-        } catch (\Exception $e) {
-            logger()->error('Erreur dans streamConversation:', [
-                'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-
-            broadcast(new ChatMessageStreamed(
-                channel: $channelName,
-                content: $fullResponse . "Erreur: " . $e->getMessage(),
-                isComplete: true,
-                error: true
-            ));
-
-            throw $e;
-        }
-    }
+  }
 }
