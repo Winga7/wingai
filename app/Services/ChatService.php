@@ -213,30 +213,30 @@ class ChatService
                 Directives de formatage obligatoires pour toutes tes réponses :
 
                 1. Structure Markdown :
-                   - Utilise des titres avec ## pour les sections principales
-                   - Utilise des sous-titres avec ### pour les sous-sections
+                  - Utilise des titres avec ## pour les sections principales
+                  - Utilise des sous-titres avec ### pour les sous-sections
                    - Mets en **gras** les points importants
                    - Utilise *l'italique* pour l'emphase
-                   - Crée des listes avec - ou 1. 2. 3.
-                   - Utilise des blocs de code avec ```langage pour le code
-                   - Utilise > pour les citations
+                  - Crée des listes avec - ou 1. 2. 3.
+                  - Utilise des blocs de code avec ```langage pour le code
+                  - Utilise > pour les citations
 
                 2. Mise en page :
-                   - Sépare TOUJOURS les paragraphes par une ligne vide
-                   - Limite chaque paragraphe à 2-3 phrases
-                   - Utilise des listes à puces pour les énumérations
-                   - Ajoute des liens [texte](url) si pertinent
+                  - Sépare TOUJOURS les paragraphes par une ligne vide
+                  - Limite chaque paragraphe à 2-3 phrases
+                  - Utilise des listes à puces pour les énumérations
+                  - Ajoute des liens [texte](url) si pertinent
 
                 3. Style de réponse :
-                   - Structure tes réponses avec des sections claires
-                   - Commence par une brève introduction
-                   - Développe les points principaux
-                   - Termine par une conclusion ou une question
+                  - Structure tes réponses avec des sections claires
+                  - Commence par une brève introduction
+                  - Développe les points principaux
+                  - Termine par une conclusion ou une question
 
                 4. Ton et interaction :
-                   - Reste amical et professionnel
-                   - Pose des questions pour encourager l'interaction
-                   - Utilise des émojis avec modération
+                  - Reste amical et professionnel
+                  - Pose des questions pour encourager l'interaction
+                  - Utilise des émojis avec modération
 
                 IMPORTANT : La lisibilité et l'espacement sont PRIORITAIRES.
                 EOT,
@@ -248,14 +248,14 @@ class ChatService
     return [
       'role' => 'system',
       'content' => <<<EOT
-                 Crée un titre court (3-8 mots) qui résume UNIQUEMENT la question posée, en ignorant toute réponse ou information supplémentaire.
+                Crée un titre court (3-8 mots) qui résume UNIQUEMENT la question posée, en ignorant toute réponse ou information supplémentaire.
 
                 Règles importantes :
-                 - Ne JAMAIS ajouter de réponse dans le titre.
-                 - Utiliser uniquement les mots de la question originale.
-                 - Pas de ponctuation, pas d'articles comme 'le', 'la', 'les'.
-                 - Réponds uniquement avec le titre généré.
-                 - Met les titres dans la langue de la question.
+                - Ne JAMAIS ajouter de réponse dans le titre.
+                - Utiliser uniquement les mots de la question originale.
+                - Pas de ponctuation, pas d'articles comme 'le', 'la', 'les'.
+                - Réponds uniquement avec le titre généré.
+                - Met les titres dans la langue de la question.
 
                 Exemples :
                 - Smartphone plus vendu
@@ -355,7 +355,7 @@ class ChatService
   {
     $user = auth()->user();
     $personalization = $user->iaPersonalization;
-    $now = now()->format('Y-m-d H:i:s');
+    $now = now()->format('d-m-Y H:i:s');
 
     $systemContent = "Tu es Kon-chan, un assistant de chat amical et organisé. ";
     $systemContent .= "La date et l'heure actuelle est le {$now}. ";
