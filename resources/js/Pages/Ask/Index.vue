@@ -1,11 +1,11 @@
 <script setup>
 import {
-    ref,
-    computed,
-    onMounted,
-    nextTick,
-    watch,
-    onBeforeUnmount,
+  ref,
+  computed,
+  onMounted,
+  nextTick,
+  watch,
+  onBeforeUnmount,
 } from "vue";
 import { useForm, router, usePage } from "@inertiajs/vue3";
 import AppLayout from "@/Layouts/AppLayout.vue";
@@ -15,19 +15,19 @@ import CharacterCount from "@/Components/CharacterCount.vue";
 import MarkdownRenderer from "@/Components/MarkdownRenderer.vue";
 import SlashCommandAutocomplete from "@/Components/SlashCommandAutocomplete.vue";
 import {
-    ChevronLeftIcon,
-    ChevronRightIcon,
-    ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronDownIcon,
 } from "@heroicons/vue/24/outline";
 import axios from "axios";
 
 const props = defineProps({
-    conversations: Array,
-    currentConversation: Object,
-    messages: Array,
-    models: Array,
-    selectedModel: String,
-    personalization: Object,
+  conversations: Array,
+  currentConversation: Object,
+  messages: Array,
+  models: Array,
+  selectedModel: String,
+  personalization: Object,
 });
 
 // Ajout des refs nécessaires
@@ -35,407 +35,526 @@ const channelSubscription = ref(null);
 const localMessages = ref(props.messages || []);
 
 const form = useForm({
-    message: "",
-    conversation_id: props.currentConversation?.id,
-    model: props.currentConversation?.model || props.selectedModel,
+  message: "",
+  conversation_id: props.currentConversation?.id,
+  model: props.currentConversation?.model || props.selectedModel,
 });
 
-// Ajout des commandes disponibles
-const availableCommands = ref([
-    {
-        command: "/help",
-        description: "Affiche la liste des commandes disponibles",
-    },
-    {
-        command: "/meteo",
-        description: "Affiche la météo pour une ville",
-    },
-    {
-        command: "/resume",
-        description: "Résume un texte",
-    },
-    // Les commandes personnalisées seront ajoutées dynamiquement
+// Supprimer availableCommands et garder uniquement
+const commands = ref([
+  {
+    command: "/help",
+    description: "Affiche la liste des commandes disponibles",
+    usage: "/help",
+  },
+  {
+    command: "/meteo",
+    description: "Affiche la météo pour une ville",
+    usage: "/meteo <ville>",
+  },
+  {
+    command: "/resume",
+    description: "Résume un texte",
+    usage: "/resume <texte>",
+  },
 ]);
 
 // Charger les commandes personnalisées
 onMounted(() => {
-    if (props.personalization?.slash_commands) {
-        availableCommands.value = [
-            ...availableCommands.value,
-            ...props.personalization.slash_commands,
-        ];
-    }
+  if (props.personalization?.slash_commands) {
+    commands.value = [
+      ...commands.value,
+      ...props.personalization.slash_commands.map((cmd) => ({
+        ...cmd,
+        usage: cmd.usage || cmd.command,
+      })),
+    ];
+  }
 
-    // Ajout de la logique de connexion au canal
-    if (props.currentConversation?.id) {
-        const channel = `chat.${props.currentConversation.id}`;
-        console.log("🔌 Tentative de connexion au canal:", channel);
+  // Ajout de la logique de connexion au canal
+  if (props.currentConversation?.id) {
+    const channel = `chat.${props.currentConversation.id}`;
+    console.log("🔌 Tentative de connexion au canal:", channel);
 
-        const subscription = window.Echo.private(channel)
-            .subscribed(() => {
-                console.log("✅ Connecté avec succès au canal:", channel);
-            })
-            .error((error) => {
-                console.error("❌ Erreur de connexion au canal:", error);
-            })
-            .listen(".message.streamed", (event) => {
-                if (event.title) {
-                    // Mise à jour du titre via Inertia
-                    router.reload({
-                        only: ["conversations"],
-                        data: {
-                            title: event.title,
-                        },
-                    });
+    const subscription = window.Echo.private(channel)
+      .subscribed(() => {
+        console.log("✅ Connecté avec succès au canal:", channel);
+      })
+      .error((error) => {
+        console.error("❌ Erreur de connexion au canal:", error);
+      })
+      .listen(".message.streamed", (event) => {
+        if (event.title) {
+          // Mise à jour du titre via Inertia
+          router.reload({
+            only: ["conversations"],
+            data: {
+              title: event.title,
+            },
+          });
 
-                    // Mise à jour locale du titre
-                    if (props.currentConversation) {
-                        props.currentConversation.title = event.title;
-                    }
-                }
+          // Mise à jour locale du titre
+          if (props.currentConversation) {
+            props.currentConversation.title = event.title;
+          }
+        }
 
-                console.log("📨 Message reçu:", {
-                    content: event.content,
-                    contentLength: event.content?.length,
-                    isComplete: event.isComplete,
-                    error: event.error,
-                });
-
-                // Ajout de vérification du contenu
-                if (!event.content && !event.isComplete) {
-                    console.warn("⚠️ Message reçu sans contenu");
-                    return;
-                }
-
-                const lastMessage =
-                    localMessages.value[localMessages.value.length - 1];
-
-                if (!lastMessage || lastMessage.role !== "assistant") {
-                    console.log(
-                        "⚠️ Aucun message assistant ciblé pour concaténer"
-                    );
-                    return;
-                }
-
-                if (event.error) {
-                    console.error("❌ Erreur reçue:", event.error);
-                    localMessages.value.pop();
-                    usePage().props.flash.error = event.content;
-                    return;
-                }
-
-                if (lastMessage.isLoading && event.content) {
-                    lastMessage.isLoading = false;
-                }
-
-                if (!event.isComplete) {
-                    if (lastMessage && lastMessage.role === "assistant") {
-                        lastMessage.content =
-                            (lastMessage.content || "") + (event.content || "");
-                        nextTick(() => scrollToBottom());
-                    }
-                }
-
-                if (event.isComplete) {
-                    console.log("✅ Message complet reçu");
-                    if (localMessages.value.length === 2) {
-                        router.reload({ only: ["conversations"] });
-                    }
-                }
-            });
-
-        channelSubscription.value = subscription;
-
-        // Maintenir la connexion active
-        const keepAlive = setInterval(() => {
-            if (channelSubscription.value) {
-                console.log("🔄 Maintien de la connexion au canal:", channel);
-            }
-        }, 30000); // Toutes les 30 secondes
-
-        // Nettoyage
-        onBeforeUnmount(() => {
-            clearInterval(keepAlive);
-            if (channelSubscription.value) {
-                channelSubscription.value.unsubscribe();
-            }
+        console.log("📨 Message reçu:", {
+          content: event.content,
+          contentLength: event.content?.length,
+          isComplete: event.isComplete,
+          error: event.error,
         });
-    }
+
+        // Ajout de vérification du contenu
+        if (!event.content && !event.isComplete) {
+          console.warn("⚠️ Message reçu sans contenu");
+          return;
+        }
+
+        const lastMessage = localMessages.value[localMessages.value.length - 1];
+
+        if (!lastMessage || lastMessage.role !== "assistant") {
+          console.log("⚠️ Aucun message assistant ciblé pour concaténer");
+          return;
+        }
+
+        if (event.error) {
+          console.error("❌ Erreur reçue:", event.error);
+          localMessages.value.pop();
+          usePage().props.flash.error = event.content;
+          return;
+        }
+
+        if (lastMessage.isLoading && event.content) {
+          lastMessage.isLoading = false;
+        }
+
+        if (!event.isComplete) {
+          if (lastMessage && lastMessage.role === "assistant") {
+            lastMessage.content =
+              (lastMessage.content || "") + (event.content || "");
+            nextTick(() => scrollToBottom());
+          }
+        }
+
+        if (event.isComplete) {
+          console.log("✅ Message complet reçu");
+          if (localMessages.value.length === 2) {
+            router.reload({ only: ["conversations"] });
+          }
+        }
+      });
+
+    channelSubscription.value = subscription;
+
+    // Maintenir la connexion active
+    const keepAlive = setInterval(() => {
+      if (channelSubscription.value) {
+        console.log("🔄 Maintien de la connexion au canal:", channel);
+      }
+    }, 30000); // Toutes les 30 secondes
+
+    // Nettoyage
+    onBeforeUnmount(() => {
+      clearInterval(keepAlive);
+      if (channelSubscription.value) {
+        channelSubscription.value.unsubscribe();
+      }
+    });
+  }
 });
 
 const handleSelectConversation = (conversation) => {
-    router.get(route("ask.index", { conversation_id: conversation.id }), {
-        preserveState: true,
-        preserveScroll: true,
-        only: ["messages", "currentConversation"],
-    });
-    localMessages.value = conversation.messages || [];
-    form.conversation_id = conversation.id;
-    form.model = conversation.model || props.selectedModel;
+  router.get(route("ask.index", { conversation_id: conversation.id }), {
+    preserveState: true,
+    preserveScroll: true,
+    only: ["messages", "currentConversation"],
+  });
+  localMessages.value = conversation.messages || [];
+  form.conversation_id = conversation.id;
+  form.model = conversation.model || props.selectedModel;
 };
 
 const messagesContainer = ref(null);
 const showScrollButton = ref(false);
 
 const scrollToBottom = () => {
-    if (messagesContainer.value) {
-        messagesContainer.value.scrollTop =
-            messagesContainer.value.scrollHeight;
-    }
+  if (messagesContainer.value) {
+    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+  }
 };
 
 const handleScroll = () => {
-    if (!messagesContainer.value) return;
+  if (!messagesContainer.value) return;
 
-    const { scrollTop, scrollHeight, clientHeight } = messagesContainer.value;
-    showScrollButton.value = scrollHeight - scrollTop - clientHeight > 100;
+  const { scrollTop, scrollHeight, clientHeight } = messagesContainer.value;
+  showScrollButton.value = scrollHeight - scrollTop - clientHeight > 100;
 };
 
 const handleSubmit = async () => {
-    if (!form.message.trim()) return;
+  if (!form.message.trim()) return;
 
-    console.log("Envoi du message:", form.message);
+  console.log("Envoi du message:", form.message);
 
-    const userMessage = {
-        role: "user",
-        content: form.message,
-    };
+  const userMessage = {
+    role: "user",
+    content: form.message,
+  };
 
-    const assistantMessage = {
-        role: "assistant",
-        content: "",
-        isLoading: true,
-    };
+  const assistantMessage = {
+    role: "assistant",
+    content: "",
+    isLoading: true,
+  };
 
-    localMessages.value.push(userMessage);
-    localMessages.value.push(assistantMessage);
+  localMessages.value.push(userMessage);
+  localMessages.value.push(assistantMessage);
 
-    const originalMessage = form.message;
-    form.message = "";
+  const originalMessage = form.message;
+  form.message = "";
 
-    try {
-        console.log(
-            "Appel API stream avec conversation:",
-            props.currentConversation.id
-        );
-        await axios.post(route("ask.stream", props.currentConversation.id), {
-            message: originalMessage,
-            model: form.model,
-        });
-    } catch (error) {
-        console.error("Erreur lors de l'envoi:", error);
-        localMessages.value.pop();
-        const errorMessage =
-            error.response?.data?.error || "Erreur lors de l'envoi du message";
-        usePage().props.flash.error = errorMessage;
-    }
+  try {
+    console.log(
+      "Appel API stream avec conversation:",
+      props.currentConversation.id
+    );
+    await axios.post(route("ask.stream", props.currentConversation.id), {
+      message: originalMessage,
+      model: form.model,
+    });
+  } catch (error) {
+    console.error("Erreur lors de l'envoi:", error);
+    localMessages.value.pop();
+    const errorMessage =
+      error.response?.data?.error || "Erreur lors de l'envoi du message";
+    usePage().props.flash.error = errorMessage;
+  }
 };
 
 const handleKeydown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        handleSubmit();
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+
+    if (showCommands.value && filteredCommands.value.length > 0) {
+      // Si les suggestions sont affichées, sélectionner la commande
+      const selectedCommand = filteredCommands.value[selectedIndex.value];
+      selectCommand(selectedCommand);
+    } else if (!e.shiftKey) {
+      // Sinon, si ce n'est pas Shift+Enter, envoyer le message
+      handleSubmit();
     }
+  }
 };
 
 const handleModelChange = (event) => {
-    form.model = event.target.value;
+  form.model = event.target.value;
 };
 
 const markdownToHtml = (content) => {
-    return marked(content, { breaks: true });
+  return marked(content, { breaks: true });
 };
 
 const handleCommandSelect = (command) => {
-    form.message = command.command + " ";
+  form.message = command.command + " ";
 };
 
 const isSidebarOpen = ref(true);
 
 const toggleSidebar = () => {
-    isSidebarOpen.value = !isSidebarOpen.value;
-    console.log("Sidebar state:", isSidebarOpen.value); // Pour déboguer
+  isSidebarOpen.value = !isSidebarOpen.value;
+  console.log("Sidebar state:", isSidebarOpen.value); // Pour déboguer
 };
 
 // Modification du watch pour utiliser localMessages
 watch(
-    localMessages,
-    () => {
-        nextTick(() => {
-            scrollToBottom();
-        });
-    },
-    { deep: true }
+  localMessages,
+  () => {
+    nextTick(() => {
+      scrollToBottom();
+    });
+  },
+  { deep: true }
 );
+
+const message = ref("");
+const showCommands = ref(false);
+const selectedIndex = ref(0);
+const messageInput = ref(null);
+
+function handleInput() {
+  showCommands.value = form.message.startsWith("/");
+  if (showCommands.value) {
+    selectedIndex.value = 0;
+  }
+}
+
+const filteredCommands = computed(() => {
+  if (!form.message.startsWith("/")) return [];
+  const search = form.message.toLowerCase();
+  return commands.value.filter((cmd) =>
+    cmd.command.toLowerCase().startsWith(search)
+  );
+});
+
+function navigateCommands(direction) {
+  if (!showCommands.value) return;
+
+  if (direction === "up") {
+    selectedIndex.value = Math.max(0, selectedIndex.value - 1);
+  } else {
+    selectedIndex.value = Math.min(
+      filteredCommands.value.length - 1,
+      selectedIndex.value + 1
+    );
+  }
+}
+
+function completeCommand() {
+  if (!showCommands.value) return;
+
+  const selectedCommand = filteredCommands.value[selectedIndex.value];
+  if (selectedCommand) {
+    form.message = selectedCommand.usage;
+    showCommands.value = false;
+    messageInput.value.focus();
+  }
+}
+
+function selectCommand(cmd) {
+  form.message = cmd.command + " ";
+
+  nextTick(() => {
+    const input = messageInput.value;
+    if (input && cmd.usage) {
+      const placeholderStart = cmd.usage.indexOf("<");
+      const placeholderEnd = cmd.usage.indexOf(">");
+
+      if (placeholderStart !== -1 && placeholderEnd !== -1) {
+        input.focus();
+        const cursorPosition = cmd.command.length + 1;
+        input.setSelectionRange(cursorPosition, cursorPosition);
+      }
+    }
+  });
+  showCommands.value = false;
+}
 </script>
 
 <template>
-    <AppLayout title="Chat avec Kon-chan">
-        <template #header>
-            <h2
-                class="text-xl font-semibold leading-tight text-gray-800 dark:text-gray-200"
-            >
-                Chat IA
-            </h2>
-        </template>
+  <AppLayout title="Chat avec Kon-chan">
+    <template #header>
+      <h2
+        class="text-xl font-semibold leading-tight text-gray-800 dark:text-gray-200"
+      >
+        Chat IA
+      </h2>
+    </template>
 
-        <div class="flex h-[calc(100vh-8rem)]">
-            <!-- Sidebar avec transition -->
-            <div class="relative flex">
-                <div
-                    v-show="isSidebarOpen"
-                    class="w-64 transition-transform duration-300 border-r border-gray-200 dark:border-gray-700"
-                >
-                    <ChatHistory
-                        :conversations="conversations"
-                        :selectedModel="form.model"
-                        :current-conversation="currentConversation"
-                        @select-conversation="handleSelectConversation"
-                    />
-                </div>
-
-                <!-- Bouton avec nouvelle fonction toggleSidebar -->
-                <button
-                    @click="toggleSidebar"
-                    class="absolute z-10 flex items-center justify-center w-6 h-12 transform -translate-y-1/2 bg-gray-100 rounded-r top-1/2 -right-6 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700"
-                >
-                    <component
-                        :is="isSidebarOpen ? ChevronLeftIcon : ChevronRightIcon"
-                        class="w-4 h-4 text-gray-500"
-                    />
-                </button>
-            </div>
-
-            <!-- Main Content -->
-            <div class="flex flex-col flex-1">
-                <!-- Model selector -->
-                <div
-                    class="flex items-center gap-4 p-2 border-b border-gray-200 dark:border-gray-700"
-                >
-                    <div class="flex items-center gap-2">
-                        <label
-                            class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                        >
-                            Modèle :
-                        </label>
-                        <select
-                            v-model="form.model"
-                            @change="handleModelChange"
-                            class="text-sm border-gray-300 rounded-md dark:border-gray-700 dark:bg-gray-900"
-                        >
-                            <option
-                                v-for="model in models"
-                                :key="model.id"
-                                :value="model.id"
-                            >
-                                {{ model.name }}
-                            </option>
-                        </select>
-                    </div>
-                    <span class="text-sm text-gray-500 dark:text-gray-400">
-                        Modèle actuel :
-                        {{
-                            models.find((m) => m.id === form.model)?.name ||
-                            form.model
-                        }}
-                    </span>
-                </div>
-
-                <!-- Messages Container avec événement scroll -->
-                <div
-                    ref="messagesContainer"
-                    @scroll="handleScroll"
-                    class="relative flex-1 p-4 space-y-4 overflow-y-auto"
-                >
-                    <div
-                        v-for="(message, index) in localMessages"
-                        :key="index"
-                        :class="[
-                            message.role === 'user' ? 'ml-auto' : 'mr-auto',
-                            'max-w-[80%] p-3 rounded-lg',
-                            message.role === 'user'
-                                ? 'bg-blue-50 dark:bg-blue-900/20'
-                                : 'bg-gray-50 dark:bg-gray-900/50',
-                        ]"
-                    >
-                        <div class="flex items-start gap-2">
-                            <div class="shrink-0">
-                                <div
-                                    :class="[
-                                        message.role === 'user'
-                                            ? 'bg-blue-100 dark:bg-blue-800'
-                                            : 'bg-purple-100 dark:bg-purple-800',
-                                        'px-2 py-1 rounded-full text-xs',
-                                    ]"
-                                >
-                                    {{
-                                        message.role === "user"
-                                            ? "Vous"
-                                            : "Kon-chan"
-                                    }}
-                                </div>
-                            </div>
-                            <MarkdownRenderer :content="message.content" />
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Bouton Scroll to Bottom -->
-                <button
-                    v-show="showScrollButton"
-                    @click="scrollToBottom"
-                    class="fixed p-2 transition-all bg-gray-100 rounded-full shadow-lg bottom-24 right-8 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
-                >
-                    <ChevronDownIcon class="w-6 h-6 text-gray-500" />
-                </button>
-
-                <!-- Input Form -->
-                <div
-                    class="p-4 bg-white border-t border-gray-200 dark:border-gray-700 dark:bg-gray-800"
-                >
-                    <div class="relative max-w-4xl mx-auto">
-                        <SlashCommandAutocomplete
-                            :message="form.message"
-                            :commands="availableCommands"
-                            @select-command="handleCommandSelect"
-                        />
-
-                        <form
-                            @submit.prevent="handleSubmit"
-                            class="flex flex-col gap-2"
-                        >
-                            <textarea
-                                v-model="form.message"
-                                @keydown="handleKeydown"
-                                rows="2"
-                                class="w-full text-sm border-gray-300 rounded-lg dark:border-gray-700 dark:bg-gray-900"
-                                placeholder="Tapez / pour les commandes. Entrée pour envoyer, Maj+Entrée pour nouvelle ligne"
-                            ></textarea>
-                            <div
-                                class="flex items-center justify-between text-xs text-gray-500"
-                            >
-                                <div class="flex gap-4">
-                                    <CharacterCount
-                                        :text="form.message"
-                                        :max="4000"
-                                    />
-                                    <span
-                                        >Maj+Entrée = nouvelle ligne | Entrée =
-                                        envoyer</span
-                                    >
-                                </div>
-                                <PrimaryButton
-                                    type="submit"
-                                    :disabled="form.processing"
-                                    class="px-3 py-1"
-                                >
-                                    Envoyer
-                                </PrimaryButton>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            </div>
+    <div class="flex h-[calc(100vh-8rem)]">
+      <!-- Sidebar avec transition -->
+      <div class="relative flex">
+        <div
+          v-show="isSidebarOpen"
+          class="w-64 transition-transform duration-300 border-r border-gray-200 dark:border-gray-700"
+        >
+          <ChatHistory
+            :conversations="conversations"
+            :selectedModel="form.model"
+            :current-conversation="currentConversation"
+            @select-conversation="handleSelectConversation"
+          />
         </div>
-    </AppLayout>
+
+        <!-- Bouton avec nouvelle fonction toggleSidebar -->
+        <button
+          @click="toggleSidebar"
+          class="absolute z-10 flex items-center justify-center w-6 h-12 transform -translate-y-1/2 bg-gray-100 rounded-r top-1/2 -right-6 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700"
+        >
+          <component
+            :is="isSidebarOpen ? ChevronLeftIcon : ChevronRightIcon"
+            class="w-4 h-4 text-gray-500"
+          />
+        </button>
+      </div>
+
+      <!-- Main Content -->
+      <div class="flex flex-col flex-1">
+        <!-- Model selector -->
+        <div
+          class="flex items-center gap-4 p-2 border-b border-gray-200 dark:border-gray-700"
+        >
+          <div class="flex items-center gap-2">
+            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              Modèle :
+            </label>
+            <select
+              v-model="form.model"
+              @change="handleModelChange"
+              class="text-sm border-gray-300 rounded-md dark:border-gray-700 dark:bg-gray-900"
+            >
+              <option v-for="model in models" :key="model.id" :value="model.id">
+                {{ model.name }}
+              </option>
+            </select>
+          </div>
+          <span class="text-sm text-gray-500 dark:text-gray-400">
+            Modèle actuel :
+            {{ models.find((m) => m.id === form.model)?.name || form.model }}
+          </span>
+        </div>
+
+        <!-- Messages Container avec événement scroll -->
+        <div
+          ref="messagesContainer"
+          @scroll="handleScroll"
+          class="relative flex-1 p-4 space-y-4 overflow-y-auto"
+        >
+          <div
+            v-for="(message, index) in localMessages"
+            :key="index"
+            :class="[
+              message.role === 'user' ? 'ml-auto' : 'mr-auto',
+              'max-w-[80%] p-3 rounded-lg',
+              message.role === 'user'
+                ? 'bg-blue-50 dark:bg-blue-900/20'
+                : 'bg-gray-50 dark:bg-gray-900/50',
+            ]"
+          >
+            <div class="flex items-start gap-2">
+              <div class="shrink-0">
+                <div
+                  :class="[
+                    message.role === 'user'
+                      ? 'bg-blue-100 dark:bg-blue-800'
+                      : 'bg-purple-100 dark:bg-purple-800',
+                    'px-2 py-1 rounded-full text-xs',
+                  ]"
+                >
+                  {{ message.role === "user" ? "Vous" : "Kon-chan" }}
+                </div>
+              </div>
+              <MarkdownRenderer :content="message.content" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Bouton Scroll to Bottom -->
+        <button
+          v-show="showScrollButton"
+          @click="scrollToBottom"
+          class="fixed p-2 transition-all bg-gray-100 rounded-full shadow-lg bottom-24 right-8 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
+        >
+          <ChevronDownIcon class="w-6 h-6 text-gray-500" />
+        </button>
+
+        <!-- Input Form -->
+        <div
+          class="p-4 bg-white border-t border-gray-200 dark:border-gray-700 dark:bg-gray-800"
+        >
+          <div class="relative max-w-4xl mx-auto">
+            <div class="command-input-wrapper relative">
+              <textarea
+                v-model="form.message"
+                @keydown.up.prevent="navigateCommands('up')"
+                @keydown.down.prevent="navigateCommands('down')"
+                @keydown.tab.prevent="completeCommand"
+                @keydown="handleKeydown"
+                @input="handleInput"
+                ref="messageInput"
+                class="w-full rounded-md border-gray-300 dark:border-gray-700 dark:bg-gray-900"
+                rows="1"
+                placeholder="Tapez / pour voir les commandes disponibles..."
+              ></textarea>
+
+              <!-- Suggestions de commandes -->
+              <div v-if="showCommands" class="command-suggestions">
+                <div
+                  v-for="(cmd, index) in filteredCommands"
+                  :key="cmd.command"
+                  :class="['command-item', { active: selectedIndex === index }]"
+                  @click="selectCommand(cmd)"
+                  @mouseover="selectedIndex = index"
+                >
+                  <div class="command-name">{{ cmd.command }}</div>
+                  <div class="command-usage" v-if="cmd.usage">
+                    {{ cmd.usage }}
+                  </div>
+                  <div class="command-description">{{ cmd.description }}</div>
+                </div>
+              </div>
+            </div>
+
+            <form @submit.prevent="handleSubmit" class="flex flex-col gap-2">
+              <div
+                class="flex items-center justify-between text-xs text-gray-500"
+              >
+                <div class="flex gap-4">
+                  <CharacterCount :text="form.message" :max="4000" />
+                  <span>Maj+Entrée = nouvelle ligne | Entrée = envoyer</span>
+                </div>
+                <PrimaryButton
+                  type="submit"
+                  :disabled="form.processing"
+                  class="px-3 py-1"
+                >
+                  Envoyer
+                </PrimaryButton>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </AppLayout>
 </template>
+
+<style scoped>
+.command-input-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.command-suggestions {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  width: 100%;
+  max-height: 200px;
+  overflow-y: auto;
+  background: #2d3748;
+  border: 1px solid #4a5568;
+  border-radius: 6px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  z-index: 50;
+}
+
+.command-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.command-item:hover,
+.command-item.active {
+  background-color: #4a5568;
+}
+
+.command-name {
+  font-weight: bold;
+  color: #a0aec0;
+}
+
+.command-usage {
+  font-family: monospace;
+  color: #68d391;
+  font-size: 0.9em;
+  margin-top: 2px;
+}
+
+.command-description {
+  color: #718096;
+  font-size: 0.9em;
+  margin-top: 2px;
+}
+</style>
