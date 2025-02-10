@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
 use App\Events\ChatMessageStreamed;
+use App\Interfaces\WeatherServiceInterface;
 
 class ChatService
 {
@@ -303,8 +304,9 @@ class ChatService
       ],
       [
         'command' => '/meteo',
-        'description' => 'Affiche la météo pour une ville',
-        'prompt' => 'Donne la météo actuelle pour la ville mentionnée. Format: /meteo [ville]'
+        'description' => 'Affiche la météo actuelle et les prévisions pour une ville',
+        'prompt' => 'weather_command',
+        'handler' => 'handleWeatherCommand'
       ],
       [
         'command' => '/resume',
@@ -314,24 +316,111 @@ class ChatService
     ];
   }
 
+  private function handleWeatherCommand(string $city): string
+  {
+    $weatherService = new OpenWeatherMapService();
+
+    try {
+      $current = $weatherService->getCurrentWeather($city);
+      $forecast = $weatherService->getForecast($city);
+
+      if (!isset($current['main'])) {
+        return "Désolé, je ne trouve pas la ville '$city'. Veuillez vérifier l'orthographe.";
+      }
+
+      $now = date('H:i');
+      $response = "# Météo {$current['name']}\n\n";
+      $response .= "{$now} | " . date('l', time()) . "\n\n";
+
+      // Conditions actuelles
+      $response .= "## " . ucfirst($current['weather'][0]['description']) . "\n\n";
+      $response .= "<div class='current-weather-card'>\n\n";
+      $response .= "![Conditions actuelles](https://openweathermap.org/img/wn/{$current['weather'][0]['icon']}@4x.png)\n\n";
+      $response .= "# {$current['main']['temp']}°\n\n";
+      $response .= "Sensation de {$current['main']['feels_like']}°\n\n";
+
+      // Informations supplémentaires
+      $response .= "| | |\n|---|---|\n";
+      $response .= "| 💨 Vent | {$current['wind']['speed']} km/h |\n";
+      $response .= "| 💧 Humidité | {$current['main']['humidity']}% |\n";
+      $response .= "| ☁️ Nuages | {$current['clouds']['all']}% |\n";
+      if (isset($current['rain']['1h'])) {
+        $response .= "| 🌧️ Pluie (1h) | {$current['rain']['1h']} mm |\n";
+      }
+      $response .= "</div>\n\n";
+
+      // Prévisions sur 7 jours
+      $response .= "## Prévisions sur 7 jours\n\n";
+      $response .= "<div class='forecast-grid'>\n\n";
+
+      $dailyForecasts = [];
+      foreach ($forecast['list'] as $item) {
+        $date = date('Y-m-d', $item['dt']);
+        if (!isset($dailyForecasts[$date])) {
+          $dailyForecasts[$date] = $item;
+        }
+      }
+
+      foreach (array_slice($dailyForecasts, 0, 7) as $date => $day) {
+        $dayName = date('l', strtotime($date));
+        $dayNum = date('d M', strtotime($date));
+
+        $response .= "### {$dayName}\n";
+        $response .= "{$dayNum}\n\n";
+        $response .= "![{$day['weather'][0]['description']}](https://openweathermap.org/img/wn/{$day['weather'][0]['icon']}@2x.png)\n\n";
+
+        if (isset($day['rain']['3h'])) {
+          $response .= "🌧️ {$day['rain']['3h']}mm\n";
+        }
+
+        $response .= "**{$day['main']['temp_max']}°** / {$day['main']['temp_min']}°\n";
+        $response .= "💨 {$day['wind']['speed']} km/h\n\n";
+        $response .= "---\n\n";
+      }
+
+      $response .= "</div>\n\n";
+
+      // Lever et coucher du soleil
+      if (isset($current['sys']['sunrise']) && isset($current['sys']['sunset'])) {
+        $response .= "## Lever et coucher du soleil\n\n";
+        $response .= "🌅 " . date('H:i', $current['sys']['sunrise']) . "\n";
+        $response .= "🌇 " . date('H:i', $current['sys']['sunset']) . "\n\n";
+      }
+
+      return $response;
+    } catch (\Exception $e) {
+      return "Désolé, une erreur est survenue lors de la récupération des données météo. Veuillez réessayer plus tard.";
+    }
+  }
+
   private function handleSlashCommand(string $message): string
   {
     $parts = explode(' ', trim($message));
     $command = $parts[0];
     $args = array_slice($parts, 1);
 
-    // Fusionner les commandes par défaut avec les commandes personnalisées
+    // Récupérer la personnalisation de l'utilisateur
+    $user = auth()->user();
+    $personalization = $user->iaPersonalization;
+    $userName = $personalization?->identity ?? $user->name;
+
+    // Fusionner les commandes
     $allCommands = array_merge(
       $this->getDefaultCommands(),
-      auth()->user()->iaPersonalization?->slash_commands ?? []
+      $personalization?->slash_commands ?? []
     );
-
-    if ($command === '/help') {
-      return $this->generateHelpMessage($allCommands);
-    }
 
     foreach ($allCommands as $cmd) {
       if ($cmd['command'] === $command) {
+        if ($command === '/meteo') {
+          if (empty($args)) {
+            return "Veuillez spécifier une ville. Exemple: /meteo Paris";
+          }
+
+          $city = implode(' ', $args);
+          return $this->handleWeatherCommand($city); // Retourner directement le résultat
+        }
+
         return $this->sendMessage([
           ['role' => 'system', 'content' => $cmd['prompt']],
           ['role' => 'user', 'content' => implode(' ', $args)]
@@ -475,5 +564,32 @@ class ChatService
 
       throw $e;
     }
+  }
+
+  private function handleWeatherFollowUp(string $city, array $weatherData, string $userName): string
+  {
+    $systemPrompt = <<<EOT
+Tu es un expert mode et météo parlant à {$userName}.
+Utilise les données météo suivantes pour fournir des recommandations vestimentaires précises et personnalisées.
+
+Instructions:
+1. Base tes recommandations sur la température, les précipitations et le vent actuels
+2. Organise les suggestions par moment de la journée si pertinent
+3. Utilise des emojis appropriés pour chaque type de vêtement
+4. Reste cohérent avec le style de conversation précédent
+
+Données météo: {$weatherData}
+EOT;
+
+    return $this->sendMessage([
+      [
+        'role' => 'system',
+        'content' => $systemPrompt
+      ],
+      [
+        'role' => 'user',
+        'content' => "Oui, je souhaite des recommandations vestimentaires pour {$city} aujourd'hui"
+      ]
+    ]);
   }
 }
