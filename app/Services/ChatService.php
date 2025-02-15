@@ -249,22 +249,26 @@ class ChatService
     return [
       'role' => 'system',
       'content' => <<<EOT
-                Crée un titre court (3-8 mots) qui résume UNIQUEMENT la question posée, en ignorant toute réponse ou information supplémentaire.
+            Tu dois créer un titre court (2-4 mots) qui reflète UNIQUEMENT le contenu du message de l'utilisateur.
 
-                Règles importantes :
-                - Ne JAMAIS ajouter de réponse dans le titre.
-                - Utiliser uniquement les mots de la question originale.
-                - Pas de ponctuation, pas d'articles comme 'le', 'la', 'les'.
-                - Réponds uniquement avec le titre généré.
-                - Met les titres dans la langue de la question.
+            Règles STRICTES :
+            - Utilise UNIQUEMENT les mots présents dans le message de l'utilisateur
+            - Ne fais AUCUNE interprétation ou analyse SEO
+            - Si le message est une salutation (bonjour, salut, etc), utilise "Nouvelle conversation"
+            - Pas d'articles (le, la, les, un, une, des)
+            - Pas de ponctuation
+            - Réponds uniquement avec le titre
 
-                Exemples :
-                - Smartphone plus vendu
-                - Fonctionnement Laravel
-                - Meilleurs jeux vidéo
+            Exemples :
+            Message: "Bonjour comment ça va ?"
+            Réponse: "Nouvelle conversation"
 
-                EOT,
+            Message: "Comment fonctionne Laravel ?"
+            Réponse: "Fonctionnement Laravel"
 
+            Message: "Quel est le meilleur smartphone ?"
+            Réponse: "Meilleur smartphone"
+            EOT,
     ];
   }
 

@@ -6,6 +6,7 @@ use App\Services\ChatService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use App\Models\Conversation;
+use App\Events\ChatMessageStreamed;
 
 class AskController extends Controller
 {
@@ -70,19 +71,7 @@ class AskController extends Controller
         ])
         ->toArray();
 
-      $conversation->update(['model' => $request->input('model')]);
-      // Générer le titre si premier message
-      if ($conversation->messages()->count() === 2) {
-        $title = (new ChatService())->generateTitle([
-          [
-            'role' => 'user',
-            'content' => $request->message
-          ]
-        ]);
-        $conversation->update(['title' => $title]);
-      }
-
-      // Lancer le stream
+      // Lancer le stream immédiatement
       $response = (new ChatService())->streamConversation(
         messages: $messages,
         model: $request->model,
@@ -94,6 +83,29 @@ class AskController extends Controller
       $assistantMessage->update([
         'content' => $response
       ]);
+
+      // Générer et mettre à jour le titre après la réponse complète
+      if ($conversation->messages()->count() === 2) {
+        $title = (new ChatService())->generateTitle([
+          [
+            'role' => 'system',
+            'content' => "Génère un titre court et naturel pour cette conversation, sans préfixes comme 'Règles importantes' ou 'Comment fonctionne'. Utilise 3 à 6 mots maximum."
+          ],
+          [
+            'role' => 'user',
+            'content' => $request->message
+          ]
+        ]);
+        $conversation->update(['title' => $title]);
+
+        // Diffuser le titre une fois qu'il est généré
+        broadcast(new ChatMessageStreamed(
+          channel: "chat.{$conversation->id}",
+          content: '',
+          isComplete: true,
+          title: $title
+        ));
+      }
 
       return response()->json(['status' => 'success']);
     } catch (\Exception $e) {
