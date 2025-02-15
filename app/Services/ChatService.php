@@ -316,6 +316,16 @@ class ChatService
         'command' => '/resume',
         'description' => 'Résume un texte',
         'prompt' => 'Fais un résumé concis du texte fourni en gardant les points essentiels'
+      ],
+      [
+        'command' => '/translate',
+        'description' => 'Traduit un texte',
+        'prompt' => 'Traduit le texte fourni en français'
+      ],
+      [
+        'command' => '/humour',
+        'description' => 'Fais une blague',
+        'prompt' => 'Fais une blague'
       ]
     ];
   }
