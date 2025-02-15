@@ -1,12 +1,11 @@
 <script setup>
 import { Head, Link, useForm } from "@inertiajs/vue3";
-import AuthenticationCard from "@/Components/AuthenticationCard.vue";
-import AuthenticationCardLogo from "@/Components/AuthenticationCardLogo.vue";
-import Checkbox from "@/Components/Checkbox.vue";
+import AuthenticationLayout from "@/Components/AuthenticationLayout.vue";
 import InputError from "@/Components/InputError.vue";
 import InputLabel from "@/Components/InputLabel.vue";
 import PrimaryButton from "@/Components/PrimaryButton.vue";
 import TextInput from "@/Components/TextInput.vue";
+import Checkbox from "@/Components/Checkbox.vue";
 
 defineProps({
   canResetPassword: Boolean,
@@ -20,25 +19,14 @@ const form = useForm({
 });
 
 const submit = () => {
-  form
-    .transform((data) => ({
-      ...data,
-      remember: form.remember ? "on" : "",
-    }))
-    .post(route("login"), {
-      onFinish: () => form.reset("password"),
-    });
+  form.post(route("login"), {
+    onFinish: () => form.reset("password"),
+  });
 };
 </script>
 
 <template>
-  <Head title="Connexion" />
-
-  <AuthenticationCard>
-    <template #logo>
-      <AuthenticationCardLogo />
-    </template>
-
+  <AuthenticationLayout title="Connexion">
     <div
       v-if="status"
       class="mb-4 font-medium text-sm text-green-600 dark:text-green-400"
@@ -87,13 +75,13 @@ const submit = () => {
         <Link
           v-if="canResetPassword"
           :href="route('password.request')"
-          class="underline text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:focus:ring-offset-gray-800"
+          class="text-sm text-gray-600 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400"
         >
           Mot de passe oublié ?
         </Link>
 
         <PrimaryButton
-          class="ms-4"
+          class="ms-4 bg-indigo-600 hover:bg-indigo-700"
           :class="{ 'opacity-25': form.processing }"
           :disabled="form.processing"
         >
@@ -101,5 +89,5 @@ const submit = () => {
         </PrimaryButton>
       </div>
     </form>
-  </AuthenticationCard>
+  </AuthenticationLayout>
 </template>
