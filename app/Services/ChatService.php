@@ -33,14 +33,14 @@ class ChatService
   {
     return cache()->remember('openai.models', now()->addHour(), function () {
       try {
-        logger()->info('Fetching models from OpenRouter API');
+        logger()->info('Récupération des modèles depuis OpenRouter API');
         $response = Http::withHeaders([
           'Authorization' => 'Bearer ' . $this->apiKey,
           'HTTP-Referer' => config('app.url')
         ])->get($this->baseUrl . '/models');
 
         if (!$response->successful()) {
-          logger()->error('Error fetching models:', [
+          logger()->error('Erreur lors de la récupération des modèles:', [
             'status' => $response->status(),
             'body' => $response->body()
           ]);
@@ -51,12 +51,13 @@ class ChatService
         }
 
         $models = $response->json('data', []);
-        logger()->debug('Raw models:', ['models' => $models]);
+        logger()->debug('Modèles bruts reçus:', ['models' => $models]);
 
-        return collect($models)
+        // Récupérer les modèles gratuits
+        $freeModels = collect($models)
           ->filter(function ($model) {
-            // Vérifie si le modèle a une structure de prix et si les prix sont à 0
-            return isset($model['pricing']) &&
+            return $model['id'] !== 'gpt-4-o1-mini' &&
+              isset($model['pricing']) &&
               isset($model['pricing']['prompt']) &&
               isset($model['pricing']['completion']) &&
               (float)$model['pricing']['prompt'] === 0.0 &&
@@ -65,19 +66,57 @@ class ChatService
           ->map(function ($model) {
             return [
               'id' => $model['id'],
-              'name' => $model['name'] . ''
+              'name' => $model['name'],
+              'isPaid' => false,
+              'supportsImages' => false
             ];
-          })
-          ->values()
-          ->all();
+          });
+
+        logger()->debug('Modèles gratuits filtrés:', ['freeModels' => $freeModels->toArray()]);
+
+        // Récupérer le modèle o1-mini depuis les modèles OpenRouter
+        $o1Mini = collect($models)
+          ->first(function ($model) {
+            logger()->debug('Vérification du modèle:', ['model_id' => $model['id']]);
+            return $model['id'] === 'gpt-4-o1-mini';
+          });
+
+        logger()->debug('Modèle O1-Mini trouvé:', ['o1Mini' => $o1Mini]);
+
+        if ($o1Mini) {
+          $paidModels = collect([[
+            'id' => 'gpt-4-o1-mini',
+            'name' => 'GPT-4 O1-Mini (⚠️ Modèle payant)',
+            'isPaid' => true,
+            'supportsImages' => true,
+            'pricing' => $o1Mini['pricing'] ?? null
+          ]]);
+        } else {
+          $paidModels = collect([[
+            'id' => 'gpt-4-o1-mini',
+            'name' => 'GPT-4 O1-Mini (⚠️ Modèle payant)',
+            'isPaid' => true,
+            'supportsImages' => true
+          ]]);
+        }
+
+        logger()->debug('Modèles payants:', ['paidModels' => $paidModels->toArray()]);
+
+        // Fusionner et retourner tous les modèles
+        $allModels = $freeModels->concat($paidModels)->values()->all();
+        logger()->debug('Tous les modèles:', ['allModels' => $allModels]);
+
+        return $allModels;
       } catch (\Exception $e) {
-        logger()->error('Exception in getModels:', [
+        logger()->error('Exception dans getModels:', [
           'message' => $e->getMessage(),
           'trace' => $e->getTraceAsString()
         ]);
         return [[
           'id' => self::DEFAULT_MODEL,
-          'name' => 'Mistral: Mistral 7B Instruct (free)'
+          'name' => 'Mistral: Mistral 7B Instruct (free)',
+          'isPaid' => false,
+          'supportsImages' => false
         ]];
       }
     });
