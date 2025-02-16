@@ -43,44 +43,48 @@
           <h2
             class="text-xl font-semibold p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 sticky top-0"
           >
-            Chat IA
+            {{ currentConversation?.title || "Nouvelle conversation" }}
           </h2>
 
           <!-- Model selector -->
           <div
-            class="flex items-center gap-4 p-2 border-b border-gray-200 dark:border-gray-700"
+            class="sticky top-[57px] z-30 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700"
           >
-            <div class="flex items-center gap-2">
-              <label
-                class="text-sm font-medium text-gray-700 dark:text-gray-300"
-              >
-                Modèle :
-              </label>
-              <select
-                v-model="form.model"
-                @change="handleModelChange"
-                class="text-sm border-gray-300 rounded-md dark:border-gray-700 dark:bg-gray-900"
-              >
-                <option
-                  v-for="model in models"
-                  :key="model.id"
-                  :value="model.id"
+            <div class="flex items-center gap-4 p-2">
+              <div class="flex items-center gap-2">
+                <label
+                  class="text-sm font-medium text-gray-700 dark:text-gray-300"
                 >
-                  {{ model.name }}
-                </option>
-              </select>
+                  Modèle :
+                </label>
+                <select
+                  v-model="form.model"
+                  @change="handleModelChange"
+                  class="text-sm border-gray-300 rounded-md dark:border-gray-700 dark:bg-gray-900"
+                >
+                  <option
+                    v-for="model in models"
+                    :key="model.id"
+                    :value="model.id"
+                  >
+                    {{ model.name }}
+                  </option>
+                </select>
+              </div>
+              <span class="text-sm text-gray-500 dark:text-gray-400">
+                Modèle actuel :
+                {{
+                  models.find((m) => m.id === form.model)?.name || form.model
+                }}
+              </span>
             </div>
-            <span class="text-sm text-gray-500 dark:text-gray-400">
-              Modèle actuel :
-              {{ models.find((m) => m.id === form.model)?.name || form.model }}
-            </span>
           </div>
 
           <!-- Messages Container avec flex-1 -->
           <div
             ref="messagesContainer"
             @scroll="handleScroll"
-            class="flex-1 p-4 space-y-4 overflow-y-auto"
+            class="flex-1 p-4 space-y-4 overflow-y-auto mt-[0px]"
           >
             <div
               v-for="(message, index) in localMessages"
