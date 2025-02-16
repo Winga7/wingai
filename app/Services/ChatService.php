@@ -56,8 +56,7 @@ class ChatService
         // Récupérer les modèles gratuits
         $freeModels = collect($models)
           ->filter(function ($model) {
-            return $model['id'] !== 'gpt-4-o1-mini' &&
-              isset($model['pricing']) &&
+            return isset($model['pricing']) &&
               isset($model['pricing']['prompt']) &&
               isset($model['pricing']['completion']) &&
               (float)$model['pricing']['prompt'] === 0.0 &&
@@ -74,27 +73,28 @@ class ChatService
 
         logger()->debug('Modèles gratuits filtrés:', ['freeModels' => $freeModels->toArray()]);
 
-        // Récupérer le modèle o1-mini depuis les modèles OpenRouter
-        $o1Mini = collect($models)
+        // Récupérer le modèle gpt 4o-mini depuis les modèles OpenRouter
+        $oMini = collect($models)
           ->first(function ($model) {
             logger()->debug('Vérification du modèle:', ['model_id' => $model['id']]);
-            return $model['id'] === 'gpt-4-o1-mini';
+            return $model['id'] === 'openai/gpt-4o-mini'; // Modification ici
           });
 
-        logger()->debug('Modèle O1-Mini trouvé:', ['o1Mini' => $o1Mini]);
+        logger()->debug('Modèle GPT 4O-Mini trouvé:', ['gpt4oMini' => $oMini]);
 
-        if ($o1Mini) {
+        // Utiliser $oMini au lieu de $o1Mini
+        if ($oMini) {
           $paidModels = collect([[
-            'id' => 'gpt-4-o1-mini',
-            'name' => 'GPT-4 O1-Mini (⚠️ Modèle payant)',
+            'id' => 'openai/gpt-4o-mini', // Modification ici
+            'name' => 'GPT-4O Mini (⚠️ Modèle payant)', // Modification du nom aussi
             'isPaid' => true,
             'supportsImages' => true,
-            'pricing' => $o1Mini['pricing'] ?? null
+            'pricing' => $oMini['pricing'] ?? null
           ]]);
         } else {
           $paidModels = collect([[
-            'id' => 'gpt-4-o1-mini',
-            'name' => 'GPT-4 O1-Mini (⚠️ Modèle payant)',
+            'id' => 'openai/gpt-4o-mini', // Modification ici
+            'name' => 'gpt O-Mini (⚠️ Modèle payant)', // Modification du nom aussi
             'isPaid' => true,
             'supportsImages' => true
           ]]);
@@ -522,6 +522,12 @@ class ChatService
   public function streamConversation(array $messages, ?string $model = null, float $temperature = 0.7, $conversation)
   {
     try {
+      // Mise à jour du modèle de la conversation si différent
+      if ($model && $model !== $conversation->model) {
+        $conversation->update(['model' => $model]);
+        logger()->info('Modèle de conversation mis à jour:', ['model' => $model]);
+      }
+
       // Si c'est le premier message, générer et envoyer le titre
       if ($conversation->messages()->count() === 1) {
         $title = $this->generateTitle([
