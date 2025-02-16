@@ -63,12 +63,7 @@ class ChatService
               (float)$model['pricing']['completion'] === 0.0;
           })
           ->map(function ($model) {
-            return [
-              'id' => $model['id'],
-              'name' => $model['name'],
-              'isPaid' => false,
-              'supportsImages' => false
-            ];
+            return $this->processModelData($model);
           });
 
         logger()->debug('Modèles gratuits filtrés:', ['freeModels' => $freeModels->toArray()]);
@@ -82,15 +77,11 @@ class ChatService
 
         logger()->debug('Modèle GPT 4O-Mini trouvé:', ['gpt4oMini' => $oMini]);
 
-        // Utiliser $oMini au lieu de $o1Mini
+
         if ($oMini) {
-          $paidModels = collect([[
-            'id' => 'openai/gpt-4o-mini', // Modification ici
-            'name' => 'GPT-4O Mini (⚠️ Modèle payant)', // Modification du nom aussi
-            'isPaid' => true,
-            'supportsImages' => true,
-            'pricing' => $oMini['pricing'] ?? null
-          ]]);
+          $paidModels = collect([
+            $this->processModelData($oMini)
+          ]);
         } else {
           $paidModels = collect([[
             'id' => 'openai/gpt-4o-mini', // Modification ici
@@ -650,5 +641,34 @@ EOT;
         'content' => "Oui, je souhaite des recommandations vestimentaires pour {$city} aujourd'hui"
       ]
     ]);
+  }
+
+  private function processModelData($model): array
+  {
+    $supportsImages = false;
+
+    if (
+      isset($model['architecture']) &&
+      isset($model['architecture']['modality']) &&
+      $model['architecture']['modality'] === 'text+image->text'
+    ) {
+      $supportsImages = true;
+    }
+
+    // Modifier le nom pour indiquer la compatibilité images
+    $name = $model['name'];
+    if ($supportsImages) {
+      $name .= ' 📸'; // Ajout de l'icône appareil photo
+    }
+
+    return [
+      'id' => $model['id'],
+      'name' => $name,
+      'isPaid' => isset($model['pricing']) &&
+        ((float)$model['pricing']['prompt'] > 0 ||
+          (float)$model['pricing']['completion'] > 0),
+      'supportsImages' => $supportsImages,
+      'pricing' => $model['pricing'] ?? null
+    ];
   }
 }
