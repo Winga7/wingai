@@ -22,6 +22,10 @@
 
 - Utiliser `AppLayout.vue` comme layout principal
 - Structure type d'une page :
+- L'ordre des sections dans les composants Vue DOIT être :
+  1. `<script>` en premier
+  2. `<template>` ensuite
+  3. `<style>` en dernier (si présent)
 
 ### 3. Format de reponse
 

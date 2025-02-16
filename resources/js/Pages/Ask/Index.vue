@@ -1,227 +1,3 @@
-<template>
-  <AppLayout title="Chat avec Kon-chan">
-    <div class="flex flex-col h-screen">
-      <!-- Container principal avec flex-col -->
-      <div class="flex flex-1">
-        <!-- Sidebar avec z-index et transition -->
-        <nav
-          :class="[
-            'fixed top-0 left-0 h-full w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 transition-all duration-300 z-40',
-            isSidebarOpen ? 'translate-x-0' : '-translate-x-full',
-          ]"
-        >
-          <div class="pt-16">
-            <ChatHistory
-              :conversations="conversations"
-              :selectedModel="form.model"
-              :current-conversation="currentConversation"
-              @select-conversation="handleSelectConversation"
-            />
-          </div>
-        </nav>
-
-        <!-- Bouton toggle -->
-        <button
-          @click="toggleSidebar"
-          class="fixed z-40 top-1/2 transform -translate-y-1/2 flex items-center justify-center w-6 h-12 bg-gray-100 rounded-r hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700"
-          :style="{ left: isSidebarOpen ? '256px' : '0' }"
-        >
-          <component
-            :is="isSidebarOpen ? ChevronLeftIcon : ChevronRightIcon"
-            class="w-4 h-4 text-gray-500"
-          />
-        </button>
-
-        <!-- Zone de contenu principal avec flex-col et adaptation à la sidebar -->
-        <main
-          :class="[
-            'flex flex-col flex-1 transition-all duration-300',
-            isSidebarOpen ? 'ml-64' : 'ml-0',
-          ]"
-        >
-          <!-- Titre h2 -->
-          <h2
-            class="text-xl font-semibold p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 sticky top-0"
-          >
-            {{ currentConversation?.title || "Nouvelle conversation" }}
-          </h2>
-
-          <!-- Model selector -->
-          <div
-            class="sticky top-[57px] z-30 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700"
-          >
-            <div class="flex items-center gap-4 p-2">
-              <div class="flex items-center gap-2">
-                <label
-                  class="text-sm font-medium text-gray-700 dark:text-gray-300"
-                >
-                  Modèle :
-                </label>
-                <select
-                  v-model="form.model"
-                  @change="handleModelChange"
-                  class="text-sm border-gray-300 rounded-md dark:border-gray-700 dark:bg-gray-900"
-                >
-                  <option
-                    v-for="model in models"
-                    :key="model.id"
-                    :value="model.id"
-                  >
-                    {{ model.name }}
-                  </option>
-                </select>
-              </div>
-              <span class="text-sm text-gray-500 dark:text-gray-400">
-                Modèle actuel :
-                {{
-                  models.find((m) => m.id === form.model)?.name || form.model
-                }}
-              </span>
-            </div>
-          </div>
-
-          <!-- Messages Container avec flex-1 -->
-          <div
-            ref="messagesContainer"
-            @scroll="handleScroll"
-            class="flex-1 p-4 space-y-4 overflow-y-auto bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-gray-800"
-          >
-            <div
-              v-for="(message, index) in localMessages"
-              :key="index"
-              class="flex items-end gap-2 group animate-fadeIn"
-              :class="[
-                message.role === 'user' ? 'justify-end' : 'justify-start',
-              ]"
-            >
-              <!-- Avatar Assistant -->
-              <div
-                v-if="message.role !== 'user'"
-                class="flex-shrink-0 mb-2 transition-transform group-hover:scale-110"
-              >
-                <div
-                  class="w-8 h-8 rounded-full flex items-center justify-center bg-gradient-to-br from-purple-400 to-purple-600 text-white shadow-lg"
-                >
-                  K
-                </div>
-              </div>
-
-              <!-- Message Content -->
-              <div
-                class="message-bubble relative min-w-[60px] max-w-[85%] sm:max-w-[75%] md:max-w-[65%] px-4 py-2.5 shadow-sm transition-all"
-                :class="[
-                  message.role === 'user'
-                    ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-2xl rounded-br-sm'
-                    : 'bg-white dark:bg-gray-800 rounded-2xl rounded-bl-sm',
-                ]"
-              >
-                <MarkdownRenderer
-                  :content="message.content"
-                  :class="[
-                    'prose max-w-none',
-                    message.role === 'user'
-                      ? 'text-white dark:text-white prose-headings:text-white prose-a:text-white'
-                      : 'text-gray-800 dark:text-gray-100',
-                  ]"
-                />
-                <span
-                  class="absolute bottom-0 text-xs text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                  :class="[message.role === 'user' ? 'right-2' : 'left-2']"
-                >
-                  {{ new Date().toLocaleTimeString() }}
-                </span>
-              </div>
-
-              <!-- Avatar Utilisateur -->
-              <div
-                v-if="message.role === 'user'"
-                class="flex-shrink-0 mb-2 transition-transform group-hover:scale-110"
-              >
-                <div
-                  class="w-8 h-8 rounded-full flex items-center justify-center bg-gradient-to-br from-blue-400 to-blue-600 text-white shadow-lg"
-                >
-                  U
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Bouton Scroll to Bottom -->
-          <button
-            v-show="showScrollButton"
-            @click="scrollToBottom"
-            class="fixed p-2 transition-all bg-gray-100 rounded-full shadow-lg bottom-24 right-8 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
-          >
-            <ChevronDownIcon class="w-6 h-6 text-gray-500" />
-          </button>
-
-          <!-- Input Form fixé en bas -->
-          <div
-            class="sticky bottom-0 w-full bg-white border-t border-gray-200 dark:border-gray-700 dark:bg-gray-800"
-          >
-            <div class="relative max-w-4xl mx-auto">
-              <div class="command-input-wrapper relative">
-                <textarea
-                  v-model="form.message"
-                  @keydown.up.prevent="navigateCommands('up')"
-                  @keydown.down.prevent="navigateCommands('down')"
-                  @keydown.tab.prevent="completeCommand"
-                  @keydown="handleKeydown"
-                  @input="handleInput"
-                  ref="messageInput"
-                  class="w-full rounded-md border-gray-300 dark:border-gray-700 dark:bg-gray-900"
-                  rows="1"
-                  placeholder="Tapez / pour voir les commandes disponibles..."
-                ></textarea>
-
-                <!-- Suggestions de commandes -->
-                <div v-if="showCommands" class="command-suggestions">
-                  <div
-                    v-for="(cmd, index) in filteredCommands"
-                    :key="cmd.command"
-                    :class="[
-                      'command-item',
-                      { active: selectedIndex === index },
-                    ]"
-                    @click="selectCommand(cmd)"
-                    @mouseover="selectedIndex = index"
-                  >
-                    <div class="command-name">{{ cmd.command }}</div>
-                    <div class="command-usage" v-if="cmd.usage">
-                      {{ cmd.usage }}
-                    </div>
-                    <div class="command-description">
-                      {{ cmd.description }}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <form @submit.prevent="handleSubmit" class="flex flex-col gap-2">
-                <div
-                  class="flex items-center justify-between text-xs text-gray-500"
-                >
-                  <div class="flex gap-4">
-                    <CharacterCount :text="form.message" :max="4000" />
-                    <span>Maj+Entrée = nouvelle ligne | Entrée = envoyer</span>
-                  </div>
-                  <PrimaryButton
-                    type="submit"
-                    :disabled="form.processing"
-                    class="px-3 py-1"
-                  >
-                    Envoyer
-                  </PrimaryButton>
-                </div>
-              </form>
-            </div>
-          </div>
-        </main>
-      </div>
-    </div>
-  </AppLayout>
-</template>
-
 <script setup>
 import {
   ref,
@@ -252,6 +28,14 @@ const props = defineProps({
   models: Array,
   selectedModel: String,
   personalization: Object,
+  auth: {
+    type: Object,
+    required: true,
+  },
+});
+
+const userInitial = computed(() => {
+  return props.auth?.user?.name?.charAt(0).toUpperCase() || "U";
 });
 
 // Ajout des refs nécessaires
@@ -564,6 +348,234 @@ function selectCommand(cmd) {
   showCommands.value = false;
 }
 </script>
+
+<template>
+  <AppLayout title="Chat avec Kon-chan">
+    <div class="flex flex-col h-screen">
+      <!-- Container principal avec flex-col -->
+      <div class="flex flex-1">
+        <!-- Sidebar avec z-index et transition -->
+        <nav
+          :class="[
+            'fixed top-0 left-0 h-full w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 transition-all duration-300 z-40',
+            isSidebarOpen ? 'translate-x-0' : '-translate-x-full',
+          ]"
+        >
+          <div class="pt-16">
+            <ChatHistory
+              :conversations="conversations"
+              :selectedModel="form.model"
+              :current-conversation="currentConversation"
+              @select-conversation="handleSelectConversation"
+            />
+          </div>
+        </nav>
+
+        <!-- Bouton toggle -->
+        <button
+          @click="toggleSidebar"
+          class="fixed z-40 top-1/2 transform -translate-y-1/2 flex items-center justify-center w-6 h-12 bg-gray-100 rounded-r hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700"
+          :style="{ left: isSidebarOpen ? '256px' : '0' }"
+        >
+          <component
+            :is="isSidebarOpen ? ChevronLeftIcon : ChevronRightIcon"
+            class="w-4 h-4 text-gray-500"
+          />
+        </button>
+
+        <!-- Zone de contenu principal avec flex-col et adaptation à la sidebar -->
+        <main
+          :class="[
+            'flex flex-col flex-1 transition-all duration-300',
+            isSidebarOpen ? 'ml-64' : 'ml-0',
+          ]"
+        >
+          <!-- Titre h2 -->
+          <h2
+            class="text-xl font-semibold p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 sticky top-0"
+          >
+            {{ currentConversation?.title || "Nouvelle conversation" }}
+          </h2>
+
+          <!-- Model selector -->
+          <div
+            class="sticky top-[57px] z-30 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700"
+          >
+            <div class="flex items-center gap-4 p-2">
+              <div class="flex items-center gap-2">
+                <label
+                  class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                >
+                  Modèle :
+                </label>
+                <select
+                  v-model="form.model"
+                  @change="handleModelChange"
+                  class="text-sm border-gray-300 rounded-md dark:border-gray-700 dark:bg-gray-900"
+                >
+                  <option
+                    v-for="model in models"
+                    :key="model.id"
+                    :value="model.id"
+                  >
+                    {{ model.name }}
+                  </option>
+                </select>
+              </div>
+              <span class="text-sm text-gray-500 dark:text-gray-400">
+                Modèle actuel :
+                {{
+                  models.find((m) => m.id === form.model)?.name || form.model
+                }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Messages Container avec flex-1 -->
+          <div
+            ref="messagesContainer"
+            @scroll="handleScroll"
+            class="flex-1 p-4 space-y-4 overflow-y-auto bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-gray-800"
+          >
+            <div
+              v-for="(message, index) in localMessages"
+              :key="index"
+              class="flex items-end gap-2 group animate-fadeIn"
+              :class="[
+                message.role === 'user' ? 'justify-end' : 'justify-start',
+              ]"
+            >
+              <!-- Avatar Assistant -->
+              <div
+                v-if="message.role !== 'user'"
+                class="flex-shrink-0 mb-2 transition-transform group-hover:scale-110"
+              >
+                <div
+                  class="w-8 h-8 rounded-full flex items-center justify-center bg-gradient-to-br from-purple-400 to-purple-600 text-white shadow-lg"
+                >
+                  K
+                </div>
+              </div>
+
+              <!-- Message Content -->
+              <div
+                class="message-bubble relative min-w-[60px] max-w-[85%] sm:max-w-[75%] md:max-w-[65%] px-4 py-2.5 shadow-md transition-all"
+                :class="[
+                  message.role === 'user'
+                    ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-2xl rounded-br-sm'
+                    : 'bg-gradient-to-r from-purple-100 to-purple-200 dark:from-purple-900 dark:to-purple-800 rounded-2xl rounded-bl-sm',
+                ]"
+              >
+                <MarkdownRenderer
+                  :content="message.content"
+                  :class="[
+                    'prose max-w-none',
+                    message.role === 'user'
+                      ? 'text-white dark:text-white prose-headings:text-white prose-a:text-white'
+                      : 'text-gray-900 dark:text-gray-100',
+                  ]"
+                />
+                <span
+                  class="absolute bottom-0 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                  :class="[
+                    message.role === 'user'
+                      ? 'right-2 text-gray-200'
+                      : 'left-2 text-gray-600 dark:text-gray-300',
+                  ]"
+                >
+                  {{ new Date().toLocaleTimeString() }}
+                </span>
+              </div>
+
+              <!-- Avatar Utilisateur -->
+              <div
+                v-if="message.role === 'user'"
+                class="flex-shrink-0 mb-2 transition-transform group-hover:scale-110"
+              >
+                <div
+                  class="w-8 h-8 rounded-full flex items-center justify-center bg-gradient-to-br from-blue-400 to-blue-600 text-white shadow-lg"
+                >
+                  {{ userInitial }}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bouton Scroll to Bottom -->
+          <button
+            v-show="showScrollButton"
+            @click="scrollToBottom"
+            class="fixed p-2 transition-all bg-gray-100 rounded-full shadow-lg bottom-24 right-8 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700"
+          >
+            <ChevronDownIcon class="w-6 h-6 text-gray-500" />
+          </button>
+
+          <!-- Input Form fixé en bas -->
+          <div
+            class="sticky bottom-0 w-full bg-white border-t border-gray-200 dark:border-gray-700 dark:bg-gray-800"
+          >
+            <div class="relative max-w-4xl mx-auto">
+              <div class="command-input-wrapper relative">
+                <textarea
+                  v-model="form.message"
+                  @keydown.up.prevent="navigateCommands('up')"
+                  @keydown.down.prevent="navigateCommands('down')"
+                  @keydown.tab.prevent="completeCommand"
+                  @keydown="handleKeydown"
+                  @input="handleInput"
+                  ref="messageInput"
+                  class="w-full rounded-md border-gray-300 dark:border-gray-700 dark:bg-gray-900"
+                  rows="1"
+                  placeholder="Tapez / pour voir les commandes disponibles..."
+                ></textarea>
+
+                <!-- Suggestions de commandes -->
+                <div v-if="showCommands" class="command-suggestions">
+                  <div
+                    v-for="(cmd, index) in filteredCommands"
+                    :key="cmd.command"
+                    :class="[
+                      'command-item',
+                      { active: selectedIndex === index },
+                    ]"
+                    @click="selectCommand(cmd)"
+                    @mouseover="selectedIndex = index"
+                  >
+                    <div class="command-name">{{ cmd.command }}</div>
+                    <div class="command-usage" v-if="cmd.usage">
+                      {{ cmd.usage }}
+                    </div>
+                    <div class="command-description">
+                      {{ cmd.description }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <form @submit.prevent="handleSubmit" class="flex flex-col gap-2">
+                <div
+                  class="flex items-center justify-between text-xs text-gray-500"
+                >
+                  <div class="flex gap-4">
+                    <CharacterCount :text="form.message" :max="4000" />
+                    <span>Maj+Entrée = nouvelle ligne | Entrée = envoyer</span>
+                  </div>
+                  <PrimaryButton
+                    type="submit"
+                    :disabled="form.processing"
+                    class="px-3 py-1"
+                  >
+                    Envoyer
+                  </PrimaryButton>
+                </div>
+              </form>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+  </AppLayout>
+</template>
 
 <style scoped>
 /* Animations et transitions */

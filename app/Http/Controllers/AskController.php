@@ -10,7 +10,7 @@ use App\Events\ChatMessageStreamed;
 
 class AskController extends Controller
 {
-  public function index(Request $request)
+  public function index(Request $request, ?Conversation $conversation = null)
   {
     $models = (new ChatService())->getModels();
     $selectedModel = auth()->user()->preferred_model ?? ChatService::DEFAULT_MODEL;
@@ -35,7 +35,10 @@ class AskController extends Controller
       'conversations' => $conversations,
       'currentConversation' => $currentConversation,
       'messages' => $messages,
-      'personalization' => $personalization
+      'personalization' => $personalization,
+      'auth' => [
+        'user' => $request->user()
+      ]
     ]);
   }
 
