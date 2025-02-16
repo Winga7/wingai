@@ -56,7 +56,7 @@ function handleImageError() {
 
     <!-- Hero Section -->
     <div class="relative isolate px-4 sm:px-6 lg:px-8">
-      <div class="mx-auto max-w-7xl py-12 sm:py-24 lg:py-32">
+      <div class="mx-auto max-w-7xl py-8 sm:py-12 lg:py-16">
         <div class="text-center px-4">
           <h1
             class="text-3xl sm:text-4xl lg:text-6xl font-bold tracking-tight text-gray-900 dark:text-white"
@@ -64,14 +64,14 @@ function handleImageError() {
             Discutez avec une IA intelligente et personnalisée
           </h1>
           <p
-            class="mt-4 sm:mt-6 text-base sm:text-lg leading-8 text-gray-600 dark:text-gray-300 max-w-3xl mx-auto"
+            class="mt-3 sm:mt-4 text-base sm:text-lg leading-8 text-gray-600 dark:text-gray-300 max-w-3xl mx-auto"
           >
             Découvrez une nouvelle façon d'interagir avec l'intelligence
             artificielle. Notre assistant IA s'adapte à vos besoins et vous aide
             dans vos tâches quotidiennes.
           </p>
           <div
-            class="mt-6 sm:mt-10 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-x-6"
+            class="mt-4 sm:mt-6 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-x-6"
           >
             <Link
               v-if="canRegister"
@@ -91,8 +91,21 @@ function handleImageError() {
       </div>
     </div>
 
+    <!-- Image Section -->
+    <div class="relative isolate px-4 sm:px-6 lg:px-8">
+      <div class="mx-auto max-w-7xl py-6">
+        <div class="flex justify-center">
+          <img
+            src="/logo/Image_Accueil.jpg"
+            alt="Image d'accueil"
+            class="w-full max-w-xl h-[300px] rounded-xl shadow-2xl object-cover"
+          />
+        </div>
+      </div>
+    </div>
+
     <!-- Features Section -->
-    <div class="py-12 sm:py-24">
+    <div class="py-8 sm:py-12">
       <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div class="mx-auto max-w-2xl lg:text-center">
           <h2
@@ -106,7 +119,7 @@ function handleImageError() {
             Tout ce dont vous avez besoin pour échanger avec l'IA
           </p>
         </div>
-        <div class="mx-auto mt-12 sm:mt-16 lg:mt-20">
+        <div class="mx-auto mt-8 sm:mt-12">
           <dl
             class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 lg:gap-8"
           >

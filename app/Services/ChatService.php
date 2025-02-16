@@ -33,14 +33,14 @@ class ChatService
   {
     return cache()->remember('openai.models', now()->addHour(), function () {
       try {
-        logger()->info('Fetching models from OpenRouter API');
+        logger()->info('Récupération des modèles depuis OpenRouter API');
         $response = Http::withHeaders([
           'Authorization' => 'Bearer ' . $this->apiKey,
           'HTTP-Referer' => config('app.url')
         ])->get($this->baseUrl . '/models');
 
         if (!$response->successful()) {
-          logger()->error('Error fetching models:', [
+          logger()->error('Erreur lors de la récupération des modèles:', [
             'status' => $response->status(),
             'body' => $response->body()
           ]);
@@ -51,11 +51,11 @@ class ChatService
         }
 
         $models = $response->json('data', []);
-        logger()->debug('Raw models:', ['models' => $models]);
+        logger()->debug('Modèles bruts reçus:', ['models' => $models]);
 
-        return collect($models)
+        // Récupérer les modèles gratuits
+        $freeModels = collect($models)
           ->filter(function ($model) {
-            // Vérifie si le modèle a une structure de prix et si les prix sont à 0
             return isset($model['pricing']) &&
               isset($model['pricing']['prompt']) &&
               isset($model['pricing']['completion']) &&
@@ -65,19 +65,58 @@ class ChatService
           ->map(function ($model) {
             return [
               'id' => $model['id'],
-              'name' => $model['name'] . ''
+              'name' => $model['name'],
+              'isPaid' => false,
+              'supportsImages' => false
             ];
-          })
-          ->values()
-          ->all();
+          });
+
+        logger()->debug('Modèles gratuits filtrés:', ['freeModels' => $freeModels->toArray()]);
+
+        // Récupérer le modèle gpt 4o-mini depuis les modèles OpenRouter
+        $oMini = collect($models)
+          ->first(function ($model) {
+            logger()->debug('Vérification du modèle:', ['model_id' => $model['id']]);
+            return $model['id'] === 'openai/gpt-4o-mini'; // Modification ici
+          });
+
+        logger()->debug('Modèle GPT 4O-Mini trouvé:', ['gpt4oMini' => $oMini]);
+
+        // Utiliser $oMini au lieu de $o1Mini
+        if ($oMini) {
+          $paidModels = collect([[
+            'id' => 'openai/gpt-4o-mini', // Modification ici
+            'name' => 'GPT-4O Mini (⚠️ Modèle payant)', // Modification du nom aussi
+            'isPaid' => true,
+            'supportsImages' => true,
+            'pricing' => $oMini['pricing'] ?? null
+          ]]);
+        } else {
+          $paidModels = collect([[
+            'id' => 'openai/gpt-4o-mini', // Modification ici
+            'name' => 'gpt O-Mini (⚠️ Modèle payant)', // Modification du nom aussi
+            'isPaid' => true,
+            'supportsImages' => true
+          ]]);
+        }
+
+        logger()->debug('Modèles payants:', ['paidModels' => $paidModels->toArray()]);
+
+        // Fusionner et retourner tous les modèles
+        $allModels = $freeModels->concat($paidModels)->values()->all();
+        logger()->debug('Tous les modèles:', ['allModels' => $allModels]);
+
+        return $allModels;
       } catch (\Exception $e) {
-        logger()->error('Exception in getModels:', [
+        logger()->error('Exception dans getModels:', [
           'message' => $e->getMessage(),
           'trace' => $e->getTraceAsString()
         ]);
         return [[
           'id' => self::DEFAULT_MODEL,
-          'name' => 'Mistral: Mistral 7B Instruct (free)'
+          'name' => 'Mistral: Mistral 7B Instruct (free)',
+          'isPaid' => false,
+          'supportsImages' => false
         ]];
       }
     });
@@ -249,22 +288,26 @@ class ChatService
     return [
       'role' => 'system',
       'content' => <<<EOT
-                Crée un titre court (3-8 mots) qui résume UNIQUEMENT la question posée, en ignorant toute réponse ou information supplémentaire.
+            Tu dois créer un titre court (2-4 mots) qui reflète UNIQUEMENT le contenu du message de l'utilisateur.
 
-                Règles importantes :
-                - Ne JAMAIS ajouter de réponse dans le titre.
-                - Utiliser uniquement les mots de la question originale.
-                - Pas de ponctuation, pas d'articles comme 'le', 'la', 'les'.
-                - Réponds uniquement avec le titre généré.
-                - Met les titres dans la langue de la question.
+            Règles STRICTES :
+            - Utilise UNIQUEMENT les mots présents dans le message de l'utilisateur
+            - Ne fais AUCUNE interprétation ou analyse SEO
+            - Si le message est une salutation (bonjour, salut, etc), utilise "Nouvelle conversation"
+            - Pas d'articles (le, la, les, un, une, des)
+            - Pas de ponctuation
+            - Réponds uniquement avec le titre
 
-                Exemples :
-                - Smartphone plus vendu
-                - Fonctionnement Laravel
-                - Meilleurs jeux vidéo
+            Exemples :
+            Message: "Bonjour comment ça va ?"
+            Réponse: "Nouvelle conversation"
 
-                EOT,
+            Message: "Comment fonctionne Laravel ?"
+            Réponse: "Fonctionnement Laravel"
 
+            Message: "Quel est le meilleur smartphone ?"
+            Réponse: "Meilleur smartphone"
+            EOT,
     ];
   }
 
@@ -312,6 +355,16 @@ class ChatService
         'command' => '/resume',
         'description' => 'Résume un texte',
         'prompt' => 'Fais un résumé concis du texte fourni en gardant les points essentiels'
+      ],
+      [
+        'command' => '/translate',
+        'description' => 'Traduit un texte',
+        'prompt' => 'Traduit le texte fourni en français'
+      ],
+      [
+        'command' => '/humour',
+        'description' => 'Fais une blague',
+        'prompt' => 'Fais une blague'
       ]
     ];
   }
@@ -469,6 +522,12 @@ class ChatService
   public function streamConversation(array $messages, ?string $model = null, float $temperature = 0.7, $conversation)
   {
     try {
+      // Mise à jour du modèle de la conversation si différent
+      if ($model && $model !== $conversation->model) {
+        $conversation->update(['model' => $model]);
+        logger()->info('Modèle de conversation mis à jour:', ['model' => $model]);
+      }
+
       // Si c'est le premier message, générer et envoyer le titre
       if ($conversation->messages()->count() === 1) {
         $title = $this->generateTitle([
