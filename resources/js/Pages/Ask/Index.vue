@@ -417,8 +417,14 @@ function selectCommand(cmd) {
                     v-for="model in models"
                     :key="model.id"
                     :value="model.id"
+                    :class="{
+                      'text-green-600 bg-green-50 dark:bg-green-900/20': model.supportsImages,
+                      'text-red-600 bg-red-50 dark:bg-red-900/20': model.isPaid
+                    }"
                   >
                     {{ model.name }}
+                    <template v-if="model.supportsImages">📸</template>
+                    <template v-if="model.isPaid">💰</template>
                   </option>
                 </select>
               </div>
@@ -640,5 +646,17 @@ function selectCommand(cmd) {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
-/* ...vos autres styles existants... */
+select option {
+  padding: 8px;
+  margin: 2px 0;
+}
+
+select option[class*="text-green"] {
+  font-weight: 500;
+}
+
+select option[class*="text-red"] {
+  font-style: italic;
+}
+
 </style>
