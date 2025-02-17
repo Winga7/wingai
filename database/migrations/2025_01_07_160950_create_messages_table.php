@@ -15,6 +15,7 @@ return new class extends Migration
       $table->id();
       $table->foreignId('conversation_id')->constrained()->onDelete('cascade');
       $table->text('content');
+      $table->text('image_url')->nullable();  // Ajout du nouveau champ
       $table->json('images')->nullable();
       $table->boolean('has_images')->default(false);
       $table->string('role'); // 'user' ou 'assistant'

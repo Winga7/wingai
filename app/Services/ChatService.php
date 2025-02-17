@@ -5,16 +5,19 @@ namespace App\Services;
 use Illuminate\Support\Facades\Http;
 use App\Events\ChatMessageStreamed;
 use App\Interfaces\WeatherServiceInterface;
+use App\Services\ImageService;
 
 class ChatService
 {
   private $baseUrl;
   private $apiKey;
   private $client;
-  public const DEFAULT_MODEL = 'mistralai/mistral-7b-instruct:free';
+  private $imageService;
+  public const DEFAULT_MODEL = 'meta-llama/llama-3.2-11b-vision-instruct:free';
 
-  public function __construct()
+  public function __construct(ImageService $imageService)
   {
+    $this->imageService = $imageService;
     $this->baseUrl = config('services.openrouter.base_url', 'https://openrouter.ai/api/v1');
     $this->apiKey = config('services.openrouter.api_key');
     $this->client = $this->createOpenAIClient();
@@ -33,79 +36,52 @@ class ChatService
   {
     return cache()->remember('openai.models', now()->addHour(), function () {
       try {
-        logger()->info('Récupération des modèles depuis OpenRouter API');
         $response = Http::withHeaders([
           'Authorization' => 'Bearer ' . $this->apiKey,
           'HTTP-Referer' => config('app.url')
         ])->get($this->baseUrl . '/models');
 
         if (!$response->successful()) {
-          logger()->error('Erreur lors de la récupération des modèles:', [
-            'status' => $response->status(),
-            'body' => $response->body()
-          ]);
-          return [[
-            'id' => self::DEFAULT_MODEL,
-            'name' => 'Mistral: Mistral 7B Instruct (free)'
-          ]];
+          throw new \Exception("Erreur API: " . $response->body());
         }
 
         $models = $response->json('data', []);
-        logger()->debug('Modèles bruts reçus:', ['models' => $models]);
 
-        // Récupérer les modèles gratuits
-        $freeModels = collect($models)
+        // Filtrer pour avoir les modèles gratuits et ceux qui supportent la vision
+        return collect($models)
           ->filter(function ($model) {
-            return isset($model['pricing']) &&
-              isset($model['pricing']['prompt']) &&
-              isset($model['pricing']['completion']) &&
-              (float)$model['pricing']['prompt'] === 0.0 &&
-              (float)$model['pricing']['completion'] === 0.0;
+            return str_ends_with($model['id'], ':free') ||
+              str_contains($model['id'], 'vision');
           })
           ->map(function ($model) {
-            return $this->processModelData($model);
-          });
-
-        logger()->debug('Modèles gratuits filtrés:', ['freeModels' => $freeModels->toArray()]);
-
-        // Récupérer le modèle gpt 4o-mini depuis les modèles OpenRouter
-        $oMini = collect($models)
-          ->first(function ($model) {
-            logger()->debug('Vérification du modèle:', ['model_id' => $model['id']]);
-            return $model['id'] === 'openai/gpt-4o-mini'; // Modification ici
-          });
-
-        logger()->debug('Modèle GPT 4O-Mini trouvé:', ['gpt4oMini' => $oMini]);
-
-
-        if ($oMini) {
-          $paidModels = collect([
-            $this->processModelData($oMini)
-          ]);
-        } else {
-          $paidModels = collect([[
-            'id' => 'openai/gpt-4o-mini', // Modification ici
-            'name' => 'gpt O-Mini (⚠️ Modèle payant)', // Modification du nom aussi
-            'isPaid' => true,
-            'supportsImages' => true
-          ]]);
-        }
-
-        logger()->debug('Modèles payants:', ['paidModels' => $paidModels->toArray()]);
-
-        // Fusionner et retourner tous les modèles
-        $allModels = $freeModels->concat($paidModels)->values()->all();
-        logger()->debug('Tous les modèles:', ['allModels' => $allModels]);
-
-        return $allModels;
+            return [
+              'id' => $model['id'],
+              'name' => $model['name'] . (
+                str_contains($model['id'], 'vision') ||
+                (isset($model['architecture']['modality']) &&
+                  $model['architecture']['modality'] === 'text+image->text')
+                ? ' 📸'
+                : ''
+              ),
+              'isPaid' => isset($model['pricing']) &&
+                ((float)$model['pricing']['prompt'] > 0 ||
+                  (float)$model['pricing']['completion'] > 0),
+              'supportsImages' => str_contains($model['id'], 'vision') ||
+                (isset($model['architecture']['modality']) &&
+                  $model['architecture']['modality'] === 'text+image->text'),
+              'pricing' => $model['pricing'] ?? null
+            ];
+          })
+          ->values()
+          ->all();
       } catch (\Exception $e) {
-        logger()->error('Exception dans getModels:', [
-          'message' => $e->getMessage(),
-          'trace' => $e->getTraceAsString()
+        logger()->error('Erreur getModels:', [
+          'message' => $e->getMessage()
         ]);
+
         return [[
           'id' => self::DEFAULT_MODEL,
-          'name' => 'Mistral: Mistral 7B Instruct (free)',
+          'name' => 'meta-llama/llama-3.2-11b-vision-instruct:free',
           'isPaid' => false,
           'supportsImages' => false
         ]];
@@ -122,51 +98,88 @@ class ChatService
    */
   public function sendMessage(array $messages, string $model = null, float $temperature = 0.7): string
   {
-    $lastMessage = end($messages);
-
-    // Si c'est une commande slash
-    if (str_starts_with($lastMessage['content'], '/')) {
-      return $this->handleSlashCommand($lastMessage['content']);
-    }
-
-    // Ajouter le contexte de personnalisation
-    $systemMessage = $this->getSystemMessage();
-    array_unshift($messages, $systemMessage);
-
     try {
-      logger()->info('Envoi du message', [
-        'model' => $model,
-        'temperature' => $temperature,
-      ]);
+      $formattedMessages = array_map(function ($message) {
+        if (!empty($message['images'])) {
+          $content = [];
+          // Ajouter le texte
+          if (!empty($message['content'])) {
+            $content[] = [
+              'type' => 'text',
+              'text' => $message['content']
+            ];
+          }
+          // Traiter chaque image
+          foreach ($message['images'] as $image) {
+            $processedImage = $this->processImageForApi($image);
+            if ($processedImage) {
+              $content[] = $processedImage;
+            }
+          }
+          return [
+            'role' => $message['role'],
+            'content' => $content
+          ];
+        }
+        return $message;
+      }, $messages);
 
-      $models = collect($this->getModels());
-      if (!$model || !$models->contains('id', $model)) {
-        $model = self::DEFAULT_MODEL;
-        logger()->info('Modèle par défaut utilisé:', ['model' => $model]);
+      $lastMessage = end($messages);
+
+      // Si c'est une commande slash
+      if (str_starts_with($lastMessage['content'], '/')) {
+        return $this->handleSlashCommand($lastMessage['content']);
       }
 
-      $messages = [$this->getChatSystemPrompt(), ...$messages];
-      $response = $this->client->chat()->create([
-        'model' => $model,
-        'messages' => $messages,
-        'temperature' => $temperature,
-      ]);
+      try {
+        // Ajouter le contexte de personnalisation
+        $systemMessage = $this->getSystemMessage();
+        array_unshift($messages, $systemMessage);
 
-      logger()->info('Réponse reçue:', ['response' => $response]);
+        // Préparer les messages pour l'API
+        $formattedMessages = array_map(function ($message) {
+          // Si le message contient une image, le formater correctement
+          if (isset($message['image_url'])) {
+            return [
+              'role' => $message['role'],
+              'content' => [
+                [
+                  'type' => 'text',
+                  'text' => $message['content']
+                ],
+                [
+                  'type' => 'image_url',
+                  'image_url' => [
+                    'url' => $message['image_url']
+                  ]
+                ]
+              ]
+            ];
+          }
 
-      $content = $response->choices[0]->message->content;
+          // Sinon retourner le message tel quel
+          return $message;
+        }, $messages);
 
-      return $content;
+        $response = $this->client->chat()->create([
+          'model' => $model ?? self::DEFAULT_MODEL,
+          'messages' => $formattedMessages,
+          'temperature' => $temperature,
+        ]);
+
+        return $response->choices[0]->message->content;
+      } catch (\Exception $e) {
+        logger()->error('Erreur dans sendMessage:', [
+          'message' => $e->getMessage(),
+          'trace' => $e->getTraceAsString()
+        ]);
+        throw $e;
+      }
     } catch (\Exception $e) {
-      if ($e->getMessage() === 'Undefined array key "choices"') {
-        throw new \Exception("Limite de messages atteinte");
-      }
-
       logger()->error('Erreur dans sendMessage:', [
         'message' => $e->getMessage(),
-        'trace' => $e->getTraceAsString(),
+        'trace' => $e->getTraceAsString()
       ]);
-
       throw $e;
     }
   }
@@ -220,11 +233,26 @@ class ChatService
 
   private function createOpenAIClient(): \OpenAI\Client
   {
-    return \OpenAI::factory()
-      ->withApiKey($this->apiKey)
-      ->withBaseUri($this->baseUrl)
-      ->make()
-    ;
+    try {
+      $client = \OpenAI::factory()
+        ->withApiKey($this->apiKey)
+        ->withBaseUri($this->baseUrl)
+        ->withHttpHeader('HTTP-Referer', config('app.url')) // Important pour OpenRouter
+        ->make();
+
+      logger()->info('Client OpenRouter créé', [
+        'base_url' => $this->baseUrl,
+        'has_api_key' => !empty($this->apiKey),
+        'referer' => config('app.url')
+      ]);
+
+      return $client;
+    } catch (\Exception $e) {
+      logger()->error('Erreur création client:', [
+        'message' => $e->getMessage()
+      ]);
+      throw $e;
+    }
   }
 
   /**
@@ -510,108 +538,60 @@ class ChatService
     ];
   }
 
-  public function streamConversation(array $messages, ?string $model = null, float $temperature = 0.7, $conversation)
+  public function streamConversation(array $messages, ?string $modelId = null, float $temperature = 0.7, $conversation = null)
   {
     try {
-      // Mise à jour du modèle de la conversation si différent
-      if ($model && $model !== $conversation->model) {
-        $conversation->update(['model' => $model]);
-        logger()->info('Modèle de conversation mis à jour:', ['model' => $model]);
-      }
-
-      // Si c'est le premier message, générer et envoyer le titre
-      if ($conversation->messages()->count() === 1) {
-        $title = $this->generateTitle([
-          [
-            'role' => 'user',
-            'content' => end($messages)['content']
-          ]
-        ]);
-
-        // Mettre à jour le titre dans la base de données
-        $conversation->update(['title' => $title]);
-
-        // Envoyer le titre via le stream
-        broadcast(new ChatMessageStreamed(
-          channel: "chat.{$conversation->id}",
-          content: '',
-          isComplete: false,
-          title: $title
-        ));
-      }
-
-      logger()->info('Début streamConversation', [
-        'model' => $model,
-        'temperature' => $temperature,
-        'conversation_id' => $conversation->id
-      ]);
-
-      $models = collect($this->getModels());
-      if (!$model || !$models->contains('id', $model)) {
-        $model = self::DEFAULT_MODEL;
-        logger()->info('Modèle par défaut utilisé:', ['model' => $model]);
-      }
-
-      $messages = [$this->getChatSystemPrompt(), ...$messages];
-      $channelName = "chat.{$conversation->id}";
-
-      logger()->info('Configuration du stream', [
-        'channel' => $channelName,
-        'messages_count' => count($messages)
-      ]);
-
-      $stream = $this->client->chat()->createStreamed([
-        'model' => $model,
-        'messages' => $messages,
-        'temperature' => $temperature,
-      ]);
-
-      $fullResponse = '';
-
-      foreach ($stream as $response) {
-        if (isset($response->choices[0]->delta->content)) {
-          $chunk = $response->choices[0]->delta->content;
-          $fullResponse .= $chunk;
-
-          logger()->info('Envoi chunk', [
-            'chunk_length' => strlen($chunk),
-            'channel' => $channelName
-          ]);
-
-          broadcast(new ChatMessageStreamed(
-            channel: $channelName,
-            content: $chunk,
-            isComplete: false
-          ));
+      // Formatage des messages avec les images
+      $formattedMessages = array_map(function ($message) {
+        if (!empty($message['image_url'])) {
+          return [
+            'role' => $message['role'],
+            'content' => [
+              [
+                'type' => 'text',
+                'text' => $message['content']
+              ],
+              [
+                'type' => 'image_url',
+                'image_url' => [
+                  'url' => $message['image_url']
+                ]
+              ]
+            ]
+          ];
         }
+        return [
+          'role' => $message['role'],
+          'content' => $message['content']
+        ];
+      }, $messages);
+
+      // Ajout du message système en premier
+      array_unshift($formattedMessages, $this->getSystemMessage());
+
+      logger()->info('Messages formatés pour l\'API:', [
+        'messages' => $formattedMessages,
+        'model' => $modelId ?? self::DEFAULT_MODEL
+      ]);
+
+      $response = $this->client->chat()->create([
+        'model' => $modelId ?? self::DEFAULT_MODEL,
+        'messages' => $formattedMessages,
+        'temperature' => $temperature,
+        'max_tokens' => 2000
+      ]);
+
+      if (!isset($response->choices[0]->message->content)) {
+        throw new \Exception("Réponse API invalide");
       }
 
-      logger()->info('Stream terminé', [
-        'full_response_length' => strlen($fullResponse),
-        'channel' => $channelName
-      ]);
-
-      broadcast(new ChatMessageStreamed(
-        channel: $channelName,
-        content: $fullResponse,
-        isComplete: true,
-        error: false
-      ));
-
-      return $fullResponse;
+      return $response->choices[0]->message->content;
     } catch (\Exception $e) {
-      logger()->error('Erreur dans streamConversation:', [
-        'message' => $e->getMessage(),
+      logger()->error('Erreur streamConversation détaillée:', [
+        'error' => $e->getMessage(),
         'trace' => $e->getTraceAsString(),
+        'messages' => $messages
       ]);
-
-      broadcast(new ChatMessageStreamed(
-        channel: $channelName,
-        content: $fullResponse . "Erreur: " . $e->getMessage(),
-        isComplete: true,
-        error: true
-      ));
-
       throw $e;
     }
   }
@@ -645,30 +625,112 @@ EOT;
 
   private function processModelData($model): array
   {
-    $supportsImages = false;
-
-    if (
-      isset($model['architecture']) &&
-      isset($model['architecture']['modality']) &&
-      $model['architecture']['modality'] === 'text+image->text'
-    ) {
-      $supportsImages = true;
-    }
-
-    // Modifier le nom pour indiquer la compatibilité images
-    $name = $model['name'];
-    if ($supportsImages) {
-      $name .= ' 📸'; // Ajout de l'icône appareil photo
-    }
+    $supportsVision = str_contains($model['id'], 'vision') ||
+      (isset($model['architecture']['modality']) &&
+        $model['architecture']['modality'] === 'text+image->text');
 
     return [
       'id' => $model['id'],
-      'name' => $name,
+      'name' => $model['name'] . ($supportsVision ? ' 📸' : ''),
       'isPaid' => isset($model['pricing']) &&
         ((float)$model['pricing']['prompt'] > 0 ||
           (float)$model['pricing']['completion'] > 0),
-      'supportsImages' => $supportsImages,
+      'supportsImages' => $supportsVision,
       'pricing' => $model['pricing'] ?? null
     ];
+  }
+
+  private function modelSupportsImages(string $modelId): bool
+  {
+    $models = collect($this->getModels());
+    $model = $models->firstWhere('id', $modelId);
+
+    return $model['supportsImages'] ?? false;
+  }
+
+  private function processImageForApi($imageData): ?array
+  {
+    try {
+      // Si c'est déjà une URL
+      if (filter_var($imageData, FILTER_VALIDATE_URL)) {
+        return [
+          'type' => 'image_url',
+          'image_url' => ['url' => $imageData]
+        ];
+      }
+
+      // Si c'est déjà un base64
+      if (str_starts_with($imageData, 'data:image/')) {
+        return [
+          'type' => 'image_url',
+          'image_url' => ['url' => $imageData]
+        ];
+      }
+
+      // Si c'est un chemin local
+      $fullPath = storage_path('app/public/' . $imageData);
+      if (file_exists($fullPath)) {
+        // Optimiser et convertir en base64
+        $optimizedData = $this->imageService->optimizeImage($fullPath);
+        $base64 = base64_encode($optimizedData);
+
+        return [
+          'type' => 'image_url',
+          'image_url' => [
+            'url' => "data:image/jpeg;base64,{$base64}"
+          ]
+        ];
+      }
+
+      return null;
+    } catch (\Exception $e) {
+      logger()->error('Erreur traitement image:', [
+        'error' => $e->getMessage(),
+        'image' => $imageData
+      ]);
+      return null;
+    }
+  }
+
+  public function isConversationFull(array $messages, string $modelId): bool
+  {
+    try {
+      // Récupérer les limites du modèle
+      $models = collect($this->getModels());
+      $model = $models->firstWhere('id', $modelId);
+
+      if (!$model) {
+        logger()->warning('Modèle non trouvé:', ['model_id' => $modelId]);
+        return false;
+      }
+
+      // Compter les tokens approximatifs (4 caractères = ~1 token en moyenne)
+      $totalTokens = 0;
+      foreach ($messages as $message) {
+        $content = $message['content'];
+        if (is_array($content)) {
+          $content = implode(' ', array_map(fn($item) => $item['text'] ?? '', $content));
+        }
+        $totalTokens += strlen($content) / 4;
+      }
+
+      // Ajouter une marge de sécurité de 20%
+      $totalTokens *= 1.2;
+
+      // Vérifier par rapport à la limite du modèle
+      $contextLength = $model['context_length'] ?? 4096; // Valeur par défaut
+
+      logger()->info('Vérification limite contexte:', [
+        'total_tokens' => $totalTokens,
+        'context_length' => $contextLength
+      ]);
+
+      return $totalTokens >= $contextLength;
+    } catch (\Exception $e) {
+      logger()->error('Erreur vérification conversation:', [
+        'error' => $e->getMessage()
+      ]);
+      return false;
+    }
   }
 }

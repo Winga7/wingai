@@ -46,7 +46,47 @@ const form = useForm({
   message: "",
   conversation_id: props.currentConversation?.id,
   model: props.currentConversation?.model || props.selectedModel,
+  image: null,
 });
+
+const fileInput = ref(null);
+const imagePreview = ref(null);
+
+// Ajout de la constante URL
+const URL = window.URL || window.webkitURL;
+
+// Fonction pour nettoyer les URLs d'objets
+function revokeObjectURL(url) {
+  if (url && url.startsWith("blob:")) {
+    URL.revokeObjectURL(url);
+  }
+}
+
+// Mise à jour de la fonction handleImageSelect
+const handleImageSelect = (event) => {
+  const file = event.target.files[0];
+  if (file) {
+    if (file.size > 16 * 1024 * 1024) {
+      // 16MB limit
+      usePage().props.flash.error = "L'image ne doit pas dépasser 16MB";
+      return;
+    }
+    form.image = file;
+    imagePreview.value = URL.createObjectURL(file);
+  }
+};
+
+// Mise à jour de la fonction removeImage
+const removeImage = () => {
+  if (imagePreview.value) {
+    revokeObjectURL(imagePreview.value);
+  }
+  form.image = null;
+  imagePreview.value = null;
+  if (fileInput.value) {
+    fileInput.value.value = "";
+  }
+};
 
 // Supprimer availableCommands et garder uniquement
 const commands = ref([
@@ -92,62 +132,31 @@ onMounted(() => {
         console.error("❌ Erreur de connexion au canal:", error);
       })
       .listen(".message.streamed", (event) => {
-        if (event.title) {
-          // Mise à jour du titre via Inertia
-          router.reload({
-            only: ["conversations"],
-            data: {
-              title: event.title,
-            },
-          });
+        console.log("📨 Message reçu:", event);
 
-          // Mise à jour locale du titre
-          if (props.currentConversation) {
-            props.currentConversation.title = event.title;
+        if (event.error) {
+          const lastMessage =
+            localMessages.value[localMessages.value.length - 1];
+          if (lastMessage && lastMessage.role === "assistant") {
+            localMessages.value.pop();
           }
-        }
-
-        console.log("📨 Message reçu:", {
-          content: event.content,
-          contentLength: event.content?.length,
-          isComplete: event.isComplete,
-          error: event.error,
-        });
-
-        // Ajout de vérification du contenu
-        if (!event.content && !event.isComplete) {
-          console.warn("⚠️ Message reçu sans contenu");
+          usePage().props.flash.error = event.error;
           return;
         }
 
         const lastMessage = localMessages.value[localMessages.value.length - 1];
-
-        if (!lastMessage || lastMessage.role !== "assistant") {
-          console.log("⚠️ Aucun message assistant ciblé pour concaténer");
-          return;
-        }
-
-        if (event.error) {
-          console.error("❌ Erreur reçue:", event.error);
-          localMessages.value.pop();
-          usePage().props.flash.error = event.content;
-          return;
-        }
-
-        if (lastMessage.isLoading && event.content) {
-          lastMessage.isLoading = false;
-        }
-
-        if (!event.isComplete) {
-          if (lastMessage && lastMessage.role === "assistant") {
+        if (lastMessage && lastMessage.role === "assistant") {
+          if (event.isComplete) {
+            lastMessage.content = event.content;
+            lastMessage.isLoading = false;
+          } else {
             lastMessage.content =
               (lastMessage.content || "") + (event.content || "");
-            nextTick(() => scrollToBottom());
           }
+          nextTick(() => scrollToBottom());
         }
 
         if (event.isComplete) {
-          console.log("✅ Message complet reçu");
           if (localMessages.value.length === 2) {
             router.reload({ only: ["conversations"] });
           }
@@ -200,43 +209,57 @@ const handleScroll = () => {
   showScrollButton.value = scrollHeight - scrollTop - clientHeight > 100;
 };
 
+const conversation = computed(() => props.currentConversation);
+
+// Mise à jour de handleSubmit
 const handleSubmit = async () => {
-  if (!form.message.trim()) return;
-
-  console.log("Envoi du message:", form.message);
-
-  const userMessage = {
-    role: "user",
-    content: form.message,
-  };
-
-  const assistantMessage = {
-    role: "assistant",
-    content: "",
-    isLoading: true,
-  };
-
-  localMessages.value.push(userMessage);
-  localMessages.value.push(assistantMessage);
-
-  const originalMessage = form.message;
-  form.message = "";
+  if (form.processing || (!form.message && !form.image)) return;
 
   try {
-    console.log(
-      "Appel API stream avec conversation:",
-      props.currentConversation.id
-    );
-    await axios.post(route("ask.stream", props.currentConversation.id), {
-      message: originalMessage,
-      model: form.model,
+    // Ajouter le message utilisateur localement avant l'envoi
+    localMessages.value.push({
+      role: "user",
+      content: form.message,
+      imageUrl: form.image ? URL.createObjectURL(form.image) : null,
     });
+
+    // Ajouter un message vide pour l'assistant
+    const assistantMessage = {
+      role: "assistant",
+      content: "",
+      isLoading: true,
+    };
+    localMessages.value.push(assistantMessage);
+
+    const formData = new FormData();
+    formData.append("message", form.message);
+    formData.append("model", form.model);
+
+    if (form.image) {
+      formData.append("image", form.image);
+    }
+
+    await form.post(route("ask.stream", conversation.value?.id), {
+      preserveScroll: true,
+      forceFormData: true,
+      onError: (error) => {
+        localMessages.value.pop(); // Retirer message assistant
+        localMessages.value.pop(); // Retirer message utilisateur
+        console.error("❌ Erreur:", error);
+      },
+    });
+
+    // Réinitialisation du formulaire
+    form.reset("message");
+    form.reset("image");
+    if (imagePreview.value) {
+      revokeObjectURL(imagePreview.value);
+      imagePreview.value = null;
+    }
   } catch (error) {
-    console.error("Erreur lors de l'envoi:", error);
+    console.error("❌ Erreur lors de l'envoi:", error);
     localMessages.value.pop();
-    const errorMessage =
-      error.response?.data?.error || "Erreur lors de l'envoi du message";
-    usePage().props.flash.error = errorMessage;
+    localMessages.value.pop();
   }
 };
 
@@ -347,6 +370,83 @@ function selectCommand(cmd) {
   });
   showCommands.value = false;
 }
+
+// Ajout des nouvelles fonctions pour la gestion des images
+const handleImageDrop = (e) => {
+  e.preventDefault();
+  const files = e.dataTransfer?.files || e.target.files;
+  if (files?.[0]) {
+    const file = files[0];
+    if (file.type.startsWith("image/")) {
+      if (file.size > 16 * 1024 * 1024) {
+        usePage().props.flash.error = "L'image ne doit pas dépasser 16MB";
+        return;
+      }
+      form.image = file;
+      imagePreview.value = URL.createObjectURL(file);
+    } else {
+      usePage().props.flash.error = "Le fichier doit être une image";
+    }
+  }
+};
+
+// Ajout du hook onBeforeUnmount pour le nettoyage
+onBeforeUnmount(() => {
+  if (imagePreview.value) {
+    revokeObjectURL(imagePreview.value);
+  }
+});
+
+const subscribeToChannel = (conversationId) => {
+  if (!conversationId) return;
+
+  // Désabonner de l'ancien canal si nécessaire
+  if (currentChannel.value) {
+    Echo.leave(currentChannel.value);
+  }
+
+  currentChannel.value = `chat.${conversationId}`;
+
+  Echo.private(currentChannel.value).listen("ChatMessageStreamed", (e) => {
+    console.log("🔄 Message reçu:", e);
+
+    // Trouver le dernier message de l'assistant
+    const lastMessage = localMessages.value[localMessages.value.length - 1];
+
+    if (lastMessage && lastMessage.role === "assistant") {
+      if (e.isComplete) {
+        // Mise à jour finale
+        lastMessage.content = e.content;
+        lastMessage.isLoading = false;
+
+        // Scroll vers le bas après la réponse complète
+        nextTick(() => {
+          scrollToBottom();
+        });
+      } else {
+        // Ajouter progressivement le contenu
+        lastMessage.content += e.content;
+      }
+    }
+  });
+};
+
+// Mettre à jour l'abonnement quand la conversation change
+watch(
+  () => conversation.value?.id,
+  (newId) => {
+    if (newId) {
+      subscribeToChannel(newId);
+    }
+  }
+);
+
+// Nettoyage à la destruction du composant
+onBeforeUnmount(() => {
+  if (currentChannel.value) {
+    Echo.leave(currentChannel.value);
+  }
+});
 </script>
 
 <template>
@@ -418,8 +518,9 @@ function selectCommand(cmd) {
                     :key="model.id"
                     :value="model.id"
                     :class="{
-                      'text-green-600 bg-green-50 dark:bg-green-900/20': model.supportsImages,
-                      'text-red-600 bg-red-50 dark:bg-red-900/20': model.isPaid
+                      'text-green-600 bg-green-50 dark:bg-green-900/20':
+                        model.supportsImages,
+                      'text-red-600 bg-red-50 dark:bg-red-900/20': model.isPaid,
                     }"
                   >
                     {{ model.name }}
@@ -472,15 +573,29 @@ function selectCommand(cmd) {
                     : 'bg-gradient-to-r from-purple-100 to-purple-200 dark:from-purple-900 dark:to-purple-800 rounded-2xl rounded-bl-sm',
                 ]"
               >
-                <MarkdownRenderer
-                  :content="message.content"
-                  :class="[
-                    'prose max-w-none',
-                    message.role === 'user'
-                      ? 'text-white dark:text-white prose-headings:text-white prose-a:text-white'
-                      : 'text-gray-900 dark:text-gray-100',
-                  ]"
-                />
+                <div
+                  v-if="message.isLoading"
+                  class="flex items-center space-x-2"
+                >
+                  <div class="animate-pulse">Chargement...</div>
+                </div>
+                <template v-else>
+                  <MarkdownRenderer
+                    :content="message.content"
+                    :class="[
+                      'prose max-w-none',
+                      message.role === 'user'
+                        ? 'text-white dark:text-white prose-headings:text-white prose-a:text-white'
+                        : 'text-gray-900 dark:text-gray-100',
+                    ]"
+                  />
+                  <img
+                    v-if="message.imageUrl"
+                    :src="message.imageUrl"
+                    class="mt-2 max-w-md rounded-lg shadow-md"
+                    alt="Image attachée"
+                  />
+                </template>
                 <span
                   class="absolute bottom-0 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
                   :class="[
@@ -521,38 +636,95 @@ function selectCommand(cmd) {
             class="sticky bottom-0 w-full bg-white border-t border-gray-200 dark:border-gray-700 dark:bg-gray-800"
           >
             <div class="relative max-w-4xl mx-auto">
-              <div class="command-input-wrapper relative">
-                <textarea
-                  v-model="form.message"
-                  @keydown.up.prevent="navigateCommands('up')"
-                  @keydown.down.prevent="navigateCommands('down')"
-                  @keydown.tab.prevent="completeCommand"
-                  @keydown="handleKeydown"
-                  @input="handleInput"
-                  ref="messageInput"
-                  class="w-full rounded-md border-gray-300 dark:border-gray-700 dark:bg-gray-900"
-                  rows="1"
-                  placeholder="Tapez / pour voir les commandes disponibles..."
-                ></textarea>
-
-                <!-- Suggestions de commandes -->
-                <div v-if="showCommands" class="command-suggestions">
-                  <div
-                    v-for="(cmd, index) in filteredCommands"
-                    :key="cmd.command"
-                    :class="[
-                      'command-item',
-                      { active: selectedIndex === index },
-                    ]"
-                    @click="selectCommand(cmd)"
-                    @mouseover="selectedIndex = index"
+              <div class="flex items-end gap-2">
+                <!-- Bouton d'upload d'image -->
+                <div class="relative group">
+                  <input
+                    type="file"
+                    ref="fileInput"
+                    @change="handleImageDrop"
+                    accept="image/*"
+                    class="hidden"
+                  />
+                  <button
+                    @click="$refs.fileInput.click()"
+                    @dragover.prevent
+                    @drop.prevent="handleImageDrop"
+                    class="flex items-center justify-center p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                   >
-                    <div class="command-name">{{ cmd.command }}</div>
-                    <div class="command-usage" v-if="cmd.usage">
-                      {{ cmd.usage }}
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="w-6 h-6"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                      />
+                    </svg>
+                  </button>
+
+                  <!-- Preview de l'image -->
+                  <div
+                    v-if="imagePreview"
+                    class="absolute bottom-full mb-2 left-0"
+                  >
+                    <div
+                      class="relative group p-1 bg-white dark:bg-gray-800 rounded-lg shadow-lg"
+                    >
+                      <img
+                        :src="imagePreview"
+                        class="w-20 h-20 object-cover rounded"
+                        alt="Image preview"
+                      />
+                      <button
+                        @click.prevent="removeImage"
+                        class="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <!-- ... -->
+                      </button>
                     </div>
-                    <div class="command-description">
-                      {{ cmd.description }}
+                  </div>
+                </div>
+
+                <!-- Textarea existant -->
+                <div class="command-input-wrapper relative flex-1">
+                  <textarea
+                    v-model="form.message"
+                    @keydown.up.prevent="navigateCommands('up')"
+                    @keydown.down.prevent="navigateCommands('down')"
+                    @keydown.tab.prevent="completeCommand"
+                    @keydown="handleKeydown"
+                    @input="handleInput"
+                    ref="messageInput"
+                    class="w-full rounded-md border-gray-300 dark:border-gray-700 dark:bg-gray-900"
+                    rows="1"
+                    placeholder="Tapez / pour voir les commandes disponibles..."
+                  ></textarea>
+
+                  <!-- Suggestions de commandes -->
+                  <div v-if="showCommands" class="command-suggestions">
+                    <div
+                      v-for="(cmd, index) in filteredCommands"
+                      :key="cmd.command"
+                      :class="[
+                        'command-item',
+                        { active: selectedIndex === index },
+                      ]"
+                      @click="selectCommand(cmd)"
+                      @mouseover="selectedIndex = index"
+                    >
+                      <div class="command-name">{{ cmd.command }}</div>
+                      <div class="command-usage" v-if="cmd.usage">
+                        {{ cmd.usage }}
+                      </div>
+                      <div class="command-description">
+                        {{ cmd.description }}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -636,7 +808,7 @@ function selectCommand(cmd) {
   background: transparent;
 }
 
-.messages-container::-webkit-scrollbar-thumb {
+messages-container::-webkit-scrollbar-thumb {
   background-color: rgba(156, 163, 175, 0.5);
   border-radius: 3px;
 }
@@ -659,4 +831,21 @@ select option[class*="text-red"] {
   font-style: italic;
 }
 
+/* Styles pour l'upload d'image */
+.image-upload-zone {
+  transition: all 0.3s ease;
+}
+
+.image-upload-zone.drag-over {
+  background-color: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+.preview-image {
+  transition: all 0.2s ease;
+}
+
+.preview-image:hover {
+  transform: scale(1.05);
+}
 </style>

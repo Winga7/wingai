@@ -3,24 +3,19 @@
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
-use App\Interfaces\WeatherServiceInterface;
-use App\Services\OpenWeatherMapService;
+use App\Services\ChatService;
+use App\Services\ImageService;
 
 class AppServiceProvider extends ServiceProvider
 {
-  /**
-   * Register any application services.
-   */
   public function register(): void
   {
-    $this->app->bind(WeatherServiceInterface::class, OpenWeatherMapService::class);
-  }
+    $this->app->singleton(ImageService::class, function ($app) {
+      return new ImageService();
+    });
 
-  /**
-   * Bootstrap any application services.
-   */
-  public function boot(): void
-  {
-    //
+    $this->app->singleton(ChatService::class, function ($app) {
+      return new ChatService($app->make(ImageService::class));
+    });
   }
 }

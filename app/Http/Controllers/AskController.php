@@ -2,17 +2,31 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Conversation;
 use App\Services\ChatService;
+use App\Services\ImageService; // Ajoutez cette ligne
+use App\Traits\ImageProcessingTrait;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
-use App\Models\Conversation;
 use App\Events\ChatMessageStreamed;
+use Illuminate\Support\Facades\Storage;
 
 class AskController extends Controller
 {
+  use ImageProcessingTrait;
+
+  protected $chatService;
+  protected $imageService; // Ajoutez cette ligne
+
+  public function __construct(ChatService $chatService, ImageService $imageService) // Modifiez le constructeur
+  {
+    $this->chatService = $chatService;
+    $this->imageService = $imageService; // Ajoutez cette ligne
+  }
+
   public function index(Request $request, ?Conversation $conversation = null)
   {
-    $models = (new ChatService())->getModels();
+    $models = $this->chatService->getModels();
     $selectedModel = auth()->user()->preferred_model ?? ChatService::DEFAULT_MODEL;
     $conversations = auth()->user()->conversations()
       ->latest()
@@ -42,78 +56,167 @@ class AskController extends Controller
     ]);
   }
 
-  public function streamMessage(Conversation $conversation, Request $request)
+  public function streamMessage(Request $request, Conversation $conversation)
   {
     $request->validate([
       'message' => 'required|string',
-      'model'   => 'nullable|string',
+      'image' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:10240',
+      'model' => 'nullable|string',
     ]);
 
     try {
-      // Sauvegarder le message utilisateur
-      $conversation->messages()->create([
+      $imageData = null;
+      $imagePath = null;
+
+      if ($request->hasFile('image')) {
+        try {
+          logger()->info('Traitement de l\'image en cours');
+          $result = $this->imageService->optimizeAndStore($request->file('image'));
+          $imagePath = $result['path'];
+          $imageData = $result['base64'];
+          logger()->info('Image traitée avec succès', [
+            'path' => $imagePath,
+            'hasBase64' => !empty($imageData)
+          ]);
+        } catch (\Exception $e) {
+          logger()->error('Erreur traitement image:', [
+            'error' => $e->getMessage()
+          ]);
+          throw new \Exception("Erreur lors du traitement de l'image: " . $e->getMessage());
+        }
+      }
+
+      $userMessage = $conversation->messages()->create([
         'content' => $request->input('message'),
-        'role'    => 'user',
-        'model'   => $request->model
+        'role' => 'user',
+        'model' => $request->model,
+        'has_images' => !is_null($imagePath),
+        'image_url' => $imageData
       ]);
 
-      // Créer le message assistant vide avant de commencer le stream
       $assistantMessage = $conversation->messages()->create([
         'content' => '',
-        'role'    => 'assistant',
-        'model'   => $request->model
+        'role' => 'assistant',
+        'model' => $request->model
       ]);
 
-      // Récupérer l'historique des messages
       $messages = $conversation->messages()
-        ->orderBy('created_at', 'asc')
+        ->where('id', '<=', $userMessage->id)
+        ->orderBy('created_at')
         ->get()
-        ->map(fn($msg) => [
-          'role'    => $msg->role,
-          'content' => $msg->content,
-        ])
+        ->map(function ($msg) {
+          $messageData = [
+            'role' => $msg->role,
+            'content' => $msg->content
+          ];
+
+          if ($msg->has_images && $msg->image_url) {
+            $messageData['image_url'] = $msg->image_url;
+          }
+
+          return $messageData;
+        })
         ->toArray();
 
-      // Lancer le stream immédiatement
-      $response = (new ChatService())->streamConversation(
+      logger()->info('Messages préparés pour le stream', [
+        'count' => count($messages),
+        'hasImages' => !empty($imageData)
+      ]);
+
+      $response = $this->chatService->streamConversation(
         messages: $messages,
-        model: $request->model,
+        modelId: $request->model,
         temperature: 0.7,
         conversation: $conversation
       );
 
-      // Mettre à jour le message assistant avec la réponse complète
-      $assistantMessage->update([
-        'content' => $response
-      ]);
+      $assistantMessage->update(['content' => $response]);
 
-      // Générer et mettre à jour le titre après la réponse complète
-      if ($conversation->messages()->count() === 2) {
-        $title = (new ChatService())->generateTitle([
-          [
-            'role' => 'system',
-            'content' => "Génère un titre court et naturel pour cette conversation, sans préfixes comme 'Règles importantes' ou 'Comment fonctionne'. Utilise 3 à 6 mots maximum."
-          ],
-          [
-            'role' => 'user',
-            'content' => $request->message
-          ]
-        ]);
-        $conversation->update(['title' => $title]);
-
-        // Diffuser le titre une fois qu'il est généré
-        broadcast(new ChatMessageStreamed(
-          channel: "chat.{$conversation->id}",
-          content: '',
-          isComplete: true,
-          title: $title
-        ));
-      }
+      broadcast(new ChatMessageStreamed(
+        channel: "chat.{$conversation->id}",
+        content: $response,
+        isComplete: true
+      ));
 
       return response()->json(['status' => 'success']);
     } catch (\Exception $e) {
+      logger()->error('Erreur streaming:', [
+        'error' => $e->getMessage(),
+        'trace' => $e->getTraceAsString()
+      ]);
       return response()->json(['error' => $e->getMessage()], 500);
     }
+  }
+
+  // Nouvelles méthodes utilitaires adaptées de Cédric
+  private function canAcceptNewMessage(Conversation $conversation, string $message): bool
+  {
+    $messages = $this->prepareMessages($conversation);
+    $messages[] = [
+      'role' => 'user',
+      'content' => $message
+    ];
+
+    return !$this->chatService->isConversationFull($messages, $conversation->model);
+  }
+
+  private function prepareMessages(Conversation $conversation): array
+  {
+    return $conversation->messages()
+      ->orderBy('created_at')
+      ->get()
+      ->map(fn($msg) => [
+        'role' => $msg->role,
+        'content' => $msg->content,
+        'images' => $msg->has_images ? [$msg->image_url] : null
+      ])
+      ->toArray();
+  }
+
+  private function handleFirstMessage(Conversation $conversation, string $message): void
+  {
+    $title = $this->generateConversationTitle($message);
+    $conversation->update(['title' => $title]);
+
+    broadcast(new ChatMessageStreamed(
+      channel: "chat.{$conversation->id}",
+      content: '',
+      isComplete: true,
+      title: $title
+    ));
+  }
+
+  private function prepareResponse(Request $request, Conversation $conversation)
+  {
+    if ($request->wantsJson()) {
+      return response()->json(['status' => 'success']);
+    }
+
+    return Inertia::render('Ask/Index', [
+      'conversation' => $conversation->fresh(),
+      'messages' => $conversation->messages()->orderBy('created_at', 'asc')->get(),
+      'status' => 'success'
+    ]);
+  }
+
+  private function handleError(\Exception $e, Request $request, ?string $imagePath)
+  {
+    if ($imagePath) {
+      Storage::delete($imagePath);
+    }
+
+    logger()->error('Erreur dans streamMessage:', [
+      'error' => $e->getMessage(),
+      'trace' => $e->getTraceAsString()
+    ]);
+
+    if ($request->wantsJson()) {
+      return response()->json(['error' => $e->getMessage()], 500);
+    }
+
+    return Inertia::render('Ask/Index', [
+      'flash' => ['error' => $e->getMessage()]
+    ]);
   }
 
   // Nouvelle fonction séparée pour la génération du titre
@@ -121,8 +224,8 @@ class AskController extends Controller
   {
     if (!$message) return 'Nouvelle conversation';
 
-    $chatService = new ChatService();
-    return $chatService->generateTitle([
+    // Utiliser $this->chatService au lieu de new ChatService()
+    return $this->chatService->generateTitle([
       [
         'role' => 'user',
         'content' => $message
@@ -136,5 +239,16 @@ class AskController extends Controller
     $conversation->update(['title' => $request->title]);
 
     return response()->json(['success' => true]);
+  }
+
+  public function stream(Request $request, ?Conversation $conversation = null)
+  {
+    $request->validate([
+      'message' => 'required|string',
+      'model' => 'required|string',
+      'image' => 'nullable|image|max:4096', // 4MB max
+    ]);
+
+    // ... reste du code
   }
 }
